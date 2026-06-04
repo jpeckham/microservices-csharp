@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Everything (Docker Compose)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "docker compose up --build",
+      "cwd": "${workspaceFolder}",
+      "postDebugTask": "docker-compose-down",
+      "serverReadyAction": {
+        "pattern": "Now listening on: http://\\[::\\]:8080",
+        "uriFormat": "http://localhost:5100",
+        "action": "openExternally"
+      }
+    }
+  ]
+}

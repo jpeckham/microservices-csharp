@@ -1,0 +1,99 @@
+@page "/profile/{Handle}"
+@rendermode InteractiveServer
+@using Social.Web.Services
+@inject AuthApi Auth
+@inject FeedApi FeedApi
+@inject SocialApi SocialApi
+
+<section class="workspace profile-page">
+    @if (_profile is null)
+    {
+        <p class="status">Loading profile...</p>
+    }
+    else
+    {
+        <section class="profile-header">
+            <div class="profile-photo">@_profile.DisplayName.FirstOrDefault()</div>
+            <div class="profile-summary">
+                <div class="profile-title-row">
+                    <div>
+                        <h1>@_profile.DisplayName</h1>
+                        <p>@_profile.Handle</p>
+                    </div>
+                    @if (_profile.IsOwnProfile)
+                    {
+                        <button class="secondary compact" @onclick="SaveName">Save name</button>
+                    }
+                    else
+                    {
+                        <div class="actions">
+                            <button @onclick="Follow">Follow</button>
+                            <button class="secondary" @onclick="Unfollow">Unfollow</button>
+                        </div>
+                    }
+                </div>
+                <div class="profile-counts">
+                    <span><strong>@_counts.FollowerCount</strong> followers</span>
+                    <span><strong>@_counts.FollowingCount</strong> following</span>
+                </div>
+                @if (_profile.IsOwnProfile)
+                {
+                    <input @bind="_displayName" />
+                }
+            </div>
+        </section>
+
+        <section class="feed">
+            <h2>Posts</h2>
+            @foreach (var post in _posts)
+            {
+                <article class="post">
+                    <div class="post-header">
+                        <strong>@post.AuthorDisplayName</strong>
+                        <span class="post-time">@post.PostedAt.ToLocalTime().ToString("g")</span>
+                    </div>
+                    <p>@post.Content</p>
+                </article>
+            }
+        </section>
+    }
+</section>
+
+@code {
+    [Parameter] public string Handle { get; set; } = "";
+    private UserProfileDto? _profile;
+    private List<FeedEntryDto> _posts = [];
+    private FollowCountsDto _counts = new(0, 0);
+    private string _displayName = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _profile = await Auth.GetProfileAsync(Handle);
+        if (_profile is not null)
+        {
+            _displayName = _profile.DisplayName;
+            _counts = await SocialApi.CountsAsync(_profile.UserId);
+            _posts = await FeedApi.ByUserAsync(_profile.UserId);
+        }
+        StateHasChanged();
+    }
+
+    private async Task SaveName()
+    {
+        await Auth.UpdateDisplayNameAsync(_displayName);
+        _profile = await Auth.GetProfileAsync(Handle);
+    }
+
+    private async Task Follow()
+    {
+        if (_profile is not null) await SocialApi.FollowAsync(_profile.UserId);
+        if (_profile is not null) _counts = await SocialApi.CountsAsync(_profile.UserId);
+    }
+
+    private async Task Unfollow()
+    {
+        if (_profile is not null) await SocialApi.UnfollowAsync(_profile.UserId);
+        if (_profile is not null) _counts = await SocialApi.CountsAsync(_profile.UserId);
+    }
+}

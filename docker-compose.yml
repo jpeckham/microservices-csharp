@@ -1,0 +1,140 @@
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  servicebus-sql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "${ACCEPT_EULA:-Y}"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-YourStrong!Passw0rd}"
+
+  servicebus-emulator:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    volumes:
+      - "./infrastructure/servicebus/Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json"
+    ports:
+      - "5672:5672"
+      - "5300:5300"
+    environment:
+      SQL_SERVER: servicebus-sql
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-YourStrong!Passw0rd}"
+      ACCEPT_EULA: "${ACCEPT_EULA:-Y}"
+      EMULATOR_HTTP_PORT: 5300
+    depends_on:
+      - servicebus-sql
+
+  identity-api:
+    build:
+      context: .
+      dockerfile: src/Identity.Api/Dockerfile
+    ports:
+      - "5101:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Mongo__ConnectionString: mongodb://mongo:27017
+      Mongo__DatabaseName: IdentityDb
+      Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
+      ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      ServiceBus__TopicName: social-events
+    depends_on:
+      - mongo
+      - servicebus-emulator
+
+  post-api:
+    build:
+      context: .
+      dockerfile: src/Post.Api/Dockerfile
+    ports:
+      - "5102:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Mongo__ConnectionString: mongodb://mongo:27017
+      Mongo__DatabaseName: PostDb
+      Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
+      ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      ServiceBus__TopicName: social-events
+    depends_on:
+      - mongo
+      - feed-api
+      - servicebus-emulator
+
+  social-api:
+    build:
+      context: .
+      dockerfile: src/Social.Api/Dockerfile
+    ports:
+      - "5103:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Mongo__ConnectionString: mongodb://mongo:27017
+      Mongo__DatabaseName: SocialDb
+      Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
+      ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      ServiceBus__TopicName: social-events
+    depends_on:
+      - mongo
+      - feed-api
+      - servicebus-emulator
+
+  engagement-api:
+    build:
+      context: .
+      dockerfile: src/Engagement.Api/Dockerfile
+    ports:
+      - "5104:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Mongo__ConnectionString: mongodb://mongo:27017
+      Mongo__DatabaseName: EngagementDb
+      Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
+      ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      ServiceBus__TopicName: social-events
+    depends_on:
+      - mongo
+      - feed-api
+      - servicebus-emulator
+
+  feed-api:
+    build:
+      context: .
+      dockerfile: src/Feed.Api/Dockerfile
+    ports:
+      - "5105:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Mongo__ConnectionString: mongodb://mongo:27017
+      Mongo__DatabaseName: FeedDb
+      Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
+      ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      ServiceBus__TopicName: social-events
+      ServiceBus__SubscriptionName: feed
+    depends_on:
+      - mongo
+      - servicebus-emulator
+
+  social-web:
+    build:
+      context: .
+      dockerfile: src/Social.Web/Dockerfile
+    ports:
+      - "5100:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Services__Identity: http://identity-api:8080/
+      Services__Post: http://post-api:8080/
+      Services__Social: http://social-api:8080/
+      Services__Engagement: http://engagement-api:8080/
+      Services__Feed: http://feed-api:8080/
+    depends_on:
+      - identity-api
+      - post-api
+      - social-api
+      - engagement-api
+      - feed-api
+
+volumes:
+  mongo-data:
