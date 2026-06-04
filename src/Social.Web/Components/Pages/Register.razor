@@ -1,0 +1,35 @@
+@page "/register"
+@rendermode InteractiveServer
+@inject Social.Web.Services.AuthApi Auth
+@inject NavigationManager Nav
+
+<section class="auth">
+    <div class="auth-panel">
+        <h1>Register</h1>
+        <p>Create a profile and start posting.</p>
+        <input @bind="_displayName" placeholder="Display name" />
+        <input @bind="_handle" placeholder="Handle" />
+        <input @bind="_email" placeholder="Email" />
+        <input @bind="_password" placeholder="Password" type="password" />
+        <button @onclick="RegisterAsync">Register</button>
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <p class="field-message">@_error</p>
+        }
+        <p class="switch">Already registered? <a href="/login">Log in</a></p>
+    </div>
+</section>
+
+@code {
+    private string _displayName = "";
+    private string _handle = "";
+    private string _email = "";
+    private string _password = "";
+    private string? _error;
+
+    private async Task RegisterAsync()
+    {
+        _error = await Auth.RegisterAsync(_email, _password, _handle, _displayName);
+        if (_error is null) Nav.NavigateTo("/login");
+    }
+}

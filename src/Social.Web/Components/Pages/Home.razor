@@ -1,0 +1,124 @@
+@page "/"
+@rendermode InteractiveServer
+@using Social.Web.Services
+@inject FeedApi FeedApi
+@inject PostApi PostApi
+@inject EngagementApi EngagementApi
+@inject SessionState Session
+
+<section class="workspace">
+    <header class="masthead">
+        <div>
+            <h1>Recent Posts</h1>
+            @if (!string.IsNullOrWhiteSpace(_handle))
+            {
+                <p>Signed in as @_handle</p>
+            }
+        </div>
+        <div class="actions">
+            <button class="@(!_followingOnly ? "" : "secondary") compact" @onclick="() => SetMode(false)">All posts</button>
+            <button class="@(_followingOnly ? "" : "secondary") compact" @onclick="() => SetMode(true)">Following</button>
+        </div>
+    </header>
+
+    <div class="feed-layout">
+        <section class="panel composer">
+            <h2>Create Post</h2>
+            @if (string.IsNullOrWhiteSpace(_handle))
+            {
+                <p class="empty"><a href="/login">Log in</a> or <a href="/register">register</a> to post.</p>
+            }
+            else
+            {
+                <textarea @bind="_newPost" maxlength="280" placeholder="Share an update."></textarea>
+                <div class="composer-submit-row">
+                    <span>@_newPost.Length / 280</span>
+                    <button disabled="@_busy" @onclick="CreatePost">Post</button>
+                </div>
+            }
+        </section>
+
+        <section class="feed">
+            <form class="search-form" @onsubmit="Search">
+                <input @bind="_search" placeholder="Search posts" />
+                <button class="compact" type="submit">Search</button>
+            </form>
+
+            @if (_posts.Count == 0)
+            {
+                <p class="empty">No posts yet.</p>
+            }
+            else
+            {
+                @foreach (var post in _posts)
+                {
+                    <article class="post">
+                        <div class="post-header">
+                            <a class="post-author-name" href="/profile/@post.AuthorHandle.TrimStart('@')">@post.AuthorDisplayName</a>
+                            <span class="post-time">@post.PostedAt.ToLocalTime().ToString("g")</span>
+                        </div>
+                        <p>@post.Content</p>
+                        <div class="post-actions">
+                            <button class="heart-button" @onclick="() => Like(post.PostId)">Like <span>@post.LikeCount</span></button>
+                            <a class="button-link" href="/posts/@post.PostId">Comments @post.CommentCount</a>
+                            @if (_userId == post.AuthorId)
+                            {
+                                <button class="secondary compact" @onclick="() => DeletePost(post.PostId)">Delete</button>
+                            }
+                        </div>
+                    </article>
+                }
+            }
+        </section>
+    </div>
+</section>
+
+@code {
+    private List<FeedEntryDto> _posts = [];
+    private Guid? _userId;
+    private string? _handle;
+    private string _newPost = "";
+    private string _search = "";
+    private bool _followingOnly;
+    private bool _busy;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _userId = await Session.GetUserIdAsync();
+        _handle = await Session.GetHandleAsync();
+        await LoadFeed();
+        StateHasChanged();
+    }
+
+    private async Task LoadFeed() => _posts = await FeedApi.GetFeedAsync(_followingOnly);
+    private async Task SetMode(bool followingOnly) { _followingOnly = followingOnly; await LoadFeed(); }
+
+    private async Task CreatePost()
+    {
+        if (string.IsNullOrWhiteSpace(_newPost)) return;
+        _busy = true;
+        await PostApi.CreateAsync(_newPost);
+        _newPost = "";
+        await LoadFeed();
+        _busy = false;
+    }
+
+    private async Task Search()
+    {
+        var results = string.IsNullOrWhiteSpace(_search) ? [] : await PostApi.SearchAsync(_search);
+        _posts = results.Select(p => new FeedEntryDto(p.PostId, p.AuthorId, p.AuthorHandle, p.AuthorDisplayName, p.Content, p.PostedAt, 0, 0)).ToList();
+    }
+
+    private async Task Like(Guid postId)
+    {
+        await EngagementApi.LikeAsync(postId);
+        await LoadFeed();
+    }
+
+    private async Task DeletePost(Guid postId)
+    {
+        await PostApi.DeleteAsync(postId);
+        await LoadFeed();
+    }
+}

@@ -1,0 +1,31 @@
+@page "/login"
+@rendermode InteractiveServer
+@inject Social.Web.Services.AuthApi Auth
+@inject NavigationManager Nav
+
+<section class="auth">
+    <div class="auth-panel">
+        <h1>Log in</h1>
+        <p>Use your registered email and password.</p>
+        <input @bind="_email" placeholder="Email" />
+        <input @bind="_password" placeholder="Password" type="password" />
+        <button @onclick="LoginAsync">Log in</button>
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <p class="field-message">@_error</p>
+        }
+        <p class="switch">Need an account? <a href="/register">Register</a></p>
+    </div>
+</section>
+
+@code {
+    private string _email = "";
+    private string _password = "";
+    private string? _error;
+
+    private async Task LoginAsync()
+    {
+        _error = await Auth.LoginAsync(_email, _password);
+        if (_error is null) Nav.NavigateTo("/", forceLoad: true);
+    }
+}

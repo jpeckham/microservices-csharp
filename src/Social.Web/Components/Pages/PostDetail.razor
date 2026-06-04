@@ -1,0 +1,84 @@
+@page "/posts/{PostId:guid}"
+@rendermode InteractiveServer
+@using Social.Web.Services
+@inject PostApi PostApi
+@inject EngagementApi EngagementApi
+
+<section class="workspace single-post-feed">
+    @if (_post is null)
+    {
+        <p class="status">Loading post...</p>
+    }
+    else
+    {
+        <article class="post">
+            <div class="post-header">
+                <a class="post-author-name" href="/profile/@_post.AuthorHandle.TrimStart('@')">@_post.AuthorDisplayName</a>
+                <span class="post-time">@_post.PostedAt.ToLocalTime().ToString("g")</span>
+            </div>
+            @if (_editing)
+            {
+                <textarea @bind="_editContent"></textarea>
+                <button class="compact" @onclick="SaveEdit">Save</button>
+            }
+            else
+            {
+                <p>@_post.Content</p>
+                <button class="secondary compact" @onclick="() => _editing = true">Edit</button>
+            }
+        </article>
+
+        <section class="panel">
+            <h2>Comments</h2>
+            <textarea @bind="_comment" placeholder="Add a comment"></textarea>
+            <button @onclick="AddComment">Comment</button>
+        </section>
+
+        <section class="feed">
+            @foreach (var comment in _comments)
+            {
+                <article class="post">
+                    <strong>@comment.AuthorDisplayName</strong>
+                    <p>@comment.Content</p>
+                </article>
+            }
+        </section>
+    }
+</section>
+
+@code {
+    [Parameter] public Guid PostId { get; set; }
+    private PostDto? _post;
+    private List<CommentDto> _comments = [];
+    private string _comment = "";
+    private string _editContent = "";
+    private bool _editing;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await Load();
+        StateHasChanged();
+    }
+
+    private async Task Load()
+    {
+        _post = await PostApi.GetAsync(PostId);
+        _editContent = _post?.Content ?? "";
+        _comments = await EngagementApi.CommentsAsync(PostId);
+    }
+
+    private async Task AddComment()
+    {
+        if (string.IsNullOrWhiteSpace(_comment)) return;
+        await EngagementApi.CommentAsync(PostId, _comment);
+        _comment = "";
+        await Load();
+    }
+
+    private async Task SaveEdit()
+    {
+        _post = await PostApi.EditAsync(PostId, _editContent);
+        _editing = false;
+    }
+}

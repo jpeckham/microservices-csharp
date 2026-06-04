@@ -1,0 +1,37 @@
+@inherits LayoutComponentBase
+@inject Social.Web.Services.SessionState Session
+
+<div class="shell">
+    <nav class="top-nav">
+        <a class="brand" href="/">MicroSocial</a>
+        <a href="/">Feed</a>
+        <a href="/login">Login</a>
+        <a href="/register">Register</a>
+        @if (!string.IsNullOrWhiteSpace(_handle))
+        {
+            <a href="/profile/@_handle.TrimStart('@')">My profile</a>
+            <span class="nav-user">@_handle</span>
+        }
+    </nav>
+
+    <main>
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">x</a>
+</div>
+
+@code {
+    private string? _handle;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _handle = await Session.GetHandleAsync();
+        StateHasChanged();
+    }
+}
