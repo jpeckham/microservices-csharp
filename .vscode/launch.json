@@ -9,8 +9,8 @@
       "cwd": "${workspaceFolder}",
       "postDebugTask": "docker-compose-down",
       "serverReadyAction": {
-        "pattern": "Now listening on: http://\\[::\\]:8080",
-        "uriFormat": "http://localhost:5100",
+        "pattern": "social-web.*Now listening on",
+        "uriFormat": "http://localhost:32123",
         "action": "openExternally"
       }
     }

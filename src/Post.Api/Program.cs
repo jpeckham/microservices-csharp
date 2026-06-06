@@ -58,7 +58,8 @@ app.MapPost("/api/posts", async (
 {
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
-    if (string.IsNullOrWhiteSpace(request.Content)) return Results.BadRequest(new { error = "Post content is required." });
+    if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 280)
+        return Results.BadRequest(new { error = "Post content must be between 1 and 280 characters." });
 
     var post = new PostDocument
     {
@@ -86,7 +87,8 @@ app.MapPut("/api/posts/{id:guid}", async (
 {
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
-    if (string.IsNullOrWhiteSpace(request.Content)) return Results.BadRequest(new { error = "Post content is required." });
+    if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 280)
+        return Results.BadRequest(new { error = "Post content must be between 1 and 280 characters." });
 
     var update = Builders<PostDocument>.Update
         .Set(p => p.Content, request.Content.Trim())
@@ -180,3 +182,5 @@ public static class ClaimsPrincipalExtensions
         return Guid.TryParse(value, out var userId) ? userId : null;
     }
 }
+
+public partial class Program { }

@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.22" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="Testcontainers.MongoDb" Version="3.10.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- extern alias disambiguates the 5 identical "Program" types at global scope -->
+    <ProjectReference Include="..\..\src\Identity.Api\Identity.Api.csproj">
+      <Aliases>IdentityApi</Aliases>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\Post.Api\Post.Api.csproj">
+      <Aliases>PostApi</Aliases>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\Social.Api\Social.Api.csproj">
+      <Aliases>SocialApi</Aliases>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\Engagement.Api\Engagement.Api.csproj">
+      <Aliases>EngagementApi</Aliases>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\Feed.Api\Feed.Api.csproj">
+      <Aliases>FeedApi</Aliases>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.AspNetCore.Hosting" />
+    <Using Include="System.Net" />
+    <Using Include="System.Net.Http.Json" />
+    <Using Include="System.Net.Http.Headers" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

@@ -212,3 +212,5 @@ public static class ClaimsPrincipalExtensions
         return Guid.TryParse(value, out var userId) ? userId : null;
     }
 }
+
+public partial class Program { }

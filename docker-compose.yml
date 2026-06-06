@@ -40,9 +40,12 @@ services:
       Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
       ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ServiceBus__TopicName: social-events
+      Messaging__LocalEventSinkUrl: http://feed-api:8080/
     depends_on:
-      - mongo
-      - servicebus-emulator
+      mongo:
+        condition: service_started
+      servicebus-emulator:
+        condition: service_started
 
   post-api:
     build:
@@ -57,10 +60,14 @@ services:
       Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
       ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ServiceBus__TopicName: social-events
+      Messaging__LocalEventSinkUrl: http://feed-api:8080/
     depends_on:
-      - mongo
-      - feed-api
-      - servicebus-emulator
+      mongo:
+        condition: service_started
+      feed-api:
+        condition: service_started
+      servicebus-emulator:
+        condition: service_started
 
   social-api:
     build:
@@ -75,10 +82,14 @@ services:
       Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
       ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ServiceBus__TopicName: social-events
+      Messaging__LocalEventSinkUrl: http://feed-api:8080/
     depends_on:
-      - mongo
-      - feed-api
-      - servicebus-emulator
+      mongo:
+        condition: service_started
+      feed-api:
+        condition: service_started
+      servicebus-emulator:
+        condition: service_started
 
   engagement-api:
     build:
@@ -93,10 +104,14 @@ services:
       Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
       ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ServiceBus__TopicName: social-events
+      Messaging__LocalEventSinkUrl: http://feed-api:8080/
     depends_on:
-      - mongo
-      - feed-api
-      - servicebus-emulator
+      mongo:
+        condition: service_started
+      feed-api:
+        condition: service_started
+      servicebus-emulator:
+        condition: service_started
 
   feed-api:
     build:
@@ -113,15 +128,19 @@ services:
       ServiceBus__TopicName: social-events
       ServiceBus__SubscriptionName: feed
     depends_on:
-      - mongo
-      - servicebus-emulator
+      mongo:
+        condition: service_started
+      servicebus-emulator:
+        condition: service_started
 
   social-web:
     build:
       context: .
       dockerfile: src/Social.Web/Dockerfile
     ports:
-      - "5100:8080"
+      - "32123:8080"
+    volumes:
+      - social-web-keys:/app/data-protection-keys
     environment:
       ASPNETCORE_URLS: http://+:8080
       Services__Identity: http://identity-api:8080/
@@ -138,3 +157,4 @@ services:
 
 volumes:
   mongo-data:
+  social-web-keys:

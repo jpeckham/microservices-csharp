@@ -23,6 +23,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Architecture.Tests", "tests\Architecture.Tests\Architecture.Tests.csproj", "{1E06C9A4-93CB-4295-B3B4-323BD118DE73}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Integration.Tests", "tests\Integration.Tests\Integration.Tests.csproj", "{05E41C36-EB92-48B1-B849-F2744F68D68A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -129,6 +131,18 @@ Global
 		{1E06C9A4-93CB-4295-B3B4-323BD118DE73}.Release|x64.Build.0 = Release|Any CPU
 		{1E06C9A4-93CB-4295-B3B4-323BD118DE73}.Release|x86.ActiveCfg = Release|Any CPU
 		{1E06C9A4-93CB-4295-B3B4-323BD118DE73}.Release|x86.Build.0 = Release|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Debug|x64.Build.0 = Debug|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Debug|x86.Build.0 = Debug|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Release|x64.ActiveCfg = Release|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Release|x64.Build.0 = Release|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Release|x86.ActiveCfg = Release|Any CPU
+		{05E41C36-EB92-48B1-B849-F2744F68D68A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -142,5 +156,6 @@ Global
 		{E213A764-4E40-40BF-880C-385AEBED1A04} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{F4E90AE6-0EF2-4974-B2E0-3A34AA5CD161} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{1E06C9A4-93CB-4295-B3B4-323BD118DE73} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{05E41C36-EB92-48B1-B849-F2744F68D68A} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

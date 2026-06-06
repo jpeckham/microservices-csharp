@@ -1,7 +1,11 @@
+using Microsoft.AspNetCore.DataProtection;
 using Social.Web.Components;
 using Social.Web.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new System.IO.DirectoryInfo("/app/data-protection-keys"));
 
 // Add services to the container.
 builder.Services.AddRazorComponents()

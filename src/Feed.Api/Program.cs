@@ -208,6 +208,8 @@ public static class ClaimsPrincipalExtensions
     }
 }
 
+public partial class Program { }
+
 public sealed class ServiceBusFeedConsumer(
     IConfiguration configuration,
     IMongoCollection<FeedEntryDocument> entries,
