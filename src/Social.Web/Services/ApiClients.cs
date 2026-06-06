@@ -70,6 +70,29 @@ public sealed class AuthApi(HttpClient identity, SessionState session)
         return response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<UserProfileDto>() : null;
     }
 
+    public async Task<List<UserSearchResultDto>> SearchUsersAsync(string q, int limit = 20, int offset = 0)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"api/users/search?q={Uri.EscapeDataString(q)}&limit={limit}&offset={offset}");
+        await AuthorizeAsync(request);
+        var response = await identity.SendAsync(request);
+        return response.IsSuccessStatusCode
+            ? await response.Content.ReadFromJsonAsync<List<UserSearchResultDto>>() ?? []
+            : [];
+    }
+
+    public async Task<string?> RequestPasswordResetAsync(string email)
+    {
+        var response = await identity.PostAsJsonAsync("api/password-reset-requests", new { email });
+        return response.IsSuccessStatusCode ? null : "Failed to request password reset.";
+    }
+
+    public async Task<string?> ResetPasswordAsync(string token, string newPassword)
+    {
+        var response = await identity.PostAsJsonAsync("api/password-resets", new { token, newPassword });
+        return response.IsSuccessStatusCode ? null : await ReadErrorAsync(response, "Failed to reset password.");
+    }
+
     public async Task<bool> UpdateDisplayNameAsync(string displayName)
     {
         using var request = new HttpRequestMessage(HttpMethod.Put, "api/users/me/display-name")
@@ -208,3 +231,4 @@ public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandl
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 public sealed record CommentDto(Guid CommentId, Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset CreatedAt);
 public sealed record ErrorResponse(string Error);
+public sealed record UserSearchResultDto(Guid UserId, string Handle, string DisplayName);

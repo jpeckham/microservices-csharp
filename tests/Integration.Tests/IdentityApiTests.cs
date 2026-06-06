@@ -1,3 +1,5 @@
+using MongoDB.Bson;
+
 namespace Integration.Tests;
 
 [Collection(nameof(IntegrationCollection))]
@@ -87,5 +89,126 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var profile = await response.Content.ReadFromJsonAsync<UserProfileDto>();
         Assert.Equal(session.Handle, profile!.Handle.TrimStart('@'));
+    }
+
+    // --- Password reset ---
+
+    [Fact]
+    public async Task RequestReset_with_registered_email_returns_204_and_sends_email()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var email = $"{id}@test.com";
+        await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email, password = "Pass123!", handle = id, displayName = $"User {id}" });
+
+        var response = await fx.Identity.PostAsJsonAsync("/api/password-reset-requests", new { email });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        var emails = await fx.GetDevEmailsAsync();
+        Assert.Contains(emails, m => m.To == email && m.Body.Contains("?token="));
+    }
+
+    [Fact]
+    public async Task RequestReset_with_unknown_email_returns_204()
+    {
+        var response = await fx.Identity.PostAsJsonAsync("/api/password-reset-requests",
+            new { email = "nobody@nowhere.com" });
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ResetPassword_with_valid_token_updates_password_and_allows_login()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var email = $"{id}@test.com";
+        await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email, password = "OldPass123!", handle = id, displayName = $"User {id}" });
+        await fx.Identity.PostAsJsonAsync("/api/password-reset-requests", new { email });
+
+        var emails = await fx.GetDevEmailsAsync();
+        var token = ExtractToken(emails.First(m => m.To == email).Body);
+
+        var resetResponse = await fx.Identity.PostAsJsonAsync("/api/password-resets",
+            new { token, newPassword = "NewPass456!" });
+        Assert.Equal(HttpStatusCode.NoContent, resetResponse.StatusCode);
+
+        var loginResponse = await fx.Identity.PostAsJsonAsync("/api/users/login",
+            new { email, password = "NewPass456!" });
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ResetPassword_token_cannot_be_reused()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var email = $"{id}@test.com";
+        await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email, password = "Pass123!", handle = id, displayName = $"User {id}" });
+        await fx.Identity.PostAsJsonAsync("/api/password-reset-requests", new { email });
+
+        var emails = await fx.GetDevEmailsAsync();
+        var token = ExtractToken(emails.First(m => m.To == email).Body);
+
+        await fx.Identity.PostAsJsonAsync("/api/password-resets", new { token, newPassword = "NewPass456!" });
+        var second = await fx.Identity.PostAsJsonAsync("/api/password-resets", new { token, newPassword = "AnotherPass789!" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task ResetPassword_with_invalid_token_returns_400()
+    {
+        var response = await fx.Identity.PostAsJsonAsync("/api/password-resets",
+            new { token = "doesnotexist", newPassword = "NewPass123!" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ResetPassword_with_weak_password_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var email = $"{id}@test.com";
+        await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email, password = "Pass123!", handle = id, displayName = $"User {id}" });
+        await fx.Identity.PostAsJsonAsync("/api/password-reset-requests", new { email });
+
+        var emails = await fx.GetDevEmailsAsync();
+        var token = ExtractToken(emails.First(m => m.To == email).Body);
+
+        var noDigit = await fx.Identity.PostAsJsonAsync("/api/password-resets",
+            new { token, newPassword = "NoDigitsHere" });
+        Assert.Equal(HttpStatusCode.BadRequest, noDigit.StatusCode);
+
+        var tooShort = await fx.Identity.PostAsJsonAsync("/api/password-resets",
+            new { token, newPassword = "Ab1!" });
+        Assert.Equal(HttpStatusCode.BadRequest, tooShort.StatusCode);
+    }
+
+    [Fact]
+    public async Task ResetPassword_with_expired_token_returns_400()
+    {
+        var token = Guid.NewGuid().ToString("N");
+        var col = fx.IdentityDb.GetCollection<BsonDocument>("passwordResetTokens");
+        await col.InsertOneAsync(new BsonDocument
+        {
+            { "_id", new BsonBinaryData(Guid.NewGuid(), GuidRepresentation.Standard) },
+            { "UserId", new BsonBinaryData(Guid.NewGuid(), GuidRepresentation.Standard) },
+            { "Token", token },
+            { "ExpiresAt", new BsonDateTime(DateTime.UtcNow.AddMinutes(-1)) },
+            { "Consumed", false }
+        });
+
+        var response = await fx.Identity.PostAsJsonAsync("/api/password-resets",
+            new { token, newPassword = "NewPass123!" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    private static string ExtractToken(string emailBody)
+    {
+        var idx = emailBody.IndexOf("?token=", StringComparison.Ordinal);
+        return idx >= 0 ? emailBody[(idx + 7)..] : throw new InvalidOperationException("Token not found in email body.");
     }
 }

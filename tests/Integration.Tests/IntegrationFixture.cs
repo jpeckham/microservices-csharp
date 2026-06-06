@@ -1,3 +1,5 @@
+using MongoDB.Bson;
+using MongoDB.Driver;
 using Testcontainers.MongoDb;
 
 namespace Integration.Tests;
@@ -7,6 +9,9 @@ public sealed class IntegrationFixture : IAsyncLifetime
     private readonly MongoDbContainer _mongo = new MongoDbBuilder()
         .WithImage("mongo:7")
         .Build();
+
+    private MongoClient _mongoClient = null!;
+    public IMongoDatabase IdentityDb => _mongoClient.GetDatabase("test_identity");
 
     private IdentityApiFactory _identityFactory = null!;
     private PostApiFactory _postFactory = null!;
@@ -25,6 +30,7 @@ public sealed class IntegrationFixture : IAsyncLifetime
         await _mongo.StartAsync();
         var cs = _mongo.GetConnectionString();
 
+        _mongoClient = new MongoClient(cs);
         _identityFactory = new IdentityApiFactory(cs);
         _postFactory = new PostApiFactory(cs);
         _socialFactory = new SocialApiFactory(cs);
@@ -76,6 +82,13 @@ public sealed class IntegrationFixture : IAsyncLifetime
             request.Content = JsonContent.Create(body);
         return request;
     }
+
+    public async Task<List<EmailMessageDto>> GetDevEmailsAsync()
+    {
+        var response = await Identity.GetAsync("/dev/emails");
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<EmailMessageDto>>() ?? [];
+    }
 }
 
 [CollectionDefinition(nameof(IntegrationCollection))]
@@ -88,3 +101,4 @@ public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, st
 public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string Content, DateTimeOffset PostedAt, int LikeCount, int CommentCount);
 public sealed record CommentDto(Guid CommentId, Guid PostId, Guid AuthorId, string AuthorHandle, string Content, DateTimeOffset CreatedAt);
 public sealed record FollowCountsDto(int FollowerCount, int FollowingCount);
+public sealed record EmailMessageDto(string To, string Subject, string Body, DateTimeOffset SentAt);

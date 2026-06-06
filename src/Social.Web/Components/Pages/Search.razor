@@ -1,0 +1,51 @@
+@page "/search"
+@rendermode InteractiveServer
+@using Social.Web.Services
+@inject AuthApi AuthApi
+
+<section class="workspace">
+    <header class="masthead">
+        <h1>Search Users</h1>
+    </header>
+
+    <div class="panel" style="max-width:600px;margin:0 auto;">
+        <form @onsubmit="DoSearch" @onsubmit:preventDefault>
+            <div style="display:flex;gap:.5rem;">
+                <input class="input" style="flex:1" placeholder="Search by handle or display name"
+                       @bind="_query" @bind:event="oninput" />
+                <button type="submit">Search</button>
+            </div>
+        </form>
+
+        @if (_searched && _results.Count == 0)
+        {
+            <p class="empty" style="margin-top:1rem;">No users found for &ldquo;@_query&rdquo;.</p>
+        }
+
+        @if (_results.Count > 0)
+        {
+            <ul style="list-style:none;padding:0;margin-top:1rem;">
+                @foreach (var user in _results)
+                {
+                    <li style="padding:.75rem 0;border-bottom:1px solid var(--border,#e5e7eb);">
+                        <a href="/profile/@user.Handle.TrimStart('@')" style="font-weight:600;">@user.Handle</a>
+                        <span style="color:#6b7280;margin-left:.5rem;">@user.DisplayName</span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</section>
+
+@code {
+    private string _query = "";
+    private List<UserSearchResultDto> _results = [];
+    private bool _searched;
+
+    private async Task DoSearch()
+    {
+        if (string.IsNullOrWhiteSpace(_query)) return;
+        _results = await AuthApi.SearchUsersAsync(_query.Trim());
+        _searched = true;
+    }
+}

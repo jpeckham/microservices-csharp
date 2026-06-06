@@ -24,7 +24,10 @@ builder.Services.AddSingleton(_ =>
     return new MongoClient(connectionString).GetDatabase(databaseName);
 });
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<UserDocument>("users"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<PasswordResetTokenDocument>("passwordResetTokens"));
 builder.Services.AddSingleton<PasswordHasher<UserDocument>>();
+builder.Services.AddSingleton<InMemoryEmailSender>();
+builder.Services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<InMemoryEmailSender>());
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "local-development-secret-change-me-32";
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
@@ -134,6 +137,23 @@ app.MapGet("/api/users/by-handle/{handle}", async (string handle, ClaimsPrincipa
         : Results.Ok(ToProfile(user, principal.GetUserId(), 0, 0));
 });
 
+app.MapGet("/api/users/search", async (string? q, int limit, int offset, IMongoCollection<UserDocument> users, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(q))
+        return Results.BadRequest(new { error = "Query parameter 'q' is required." });
+
+    var clampedLimit = limit is <= 0 or > 50 ? 20 : limit;
+    var regex = new MongoDB.Bson.BsonRegularExpression(System.Text.RegularExpressions.Regex.Escape(q), "i");
+    var filter = Builders<UserDocument>.Filter.Or(
+        Builders<UserDocument>.Filter.Regex(u => u.Handle, regex),
+        Builders<UserDocument>.Filter.Regex(u => u.DisplayName, regex));
+    var result = await users.Find(filter)
+        .Skip(offset)
+        .Limit(clampedLimit)
+        .ToListAsync(ct);
+    return Results.Ok(result.Select(u => new UserSearchResultDto(u.Id, u.Handle, u.DisplayName)));
+});
+
 app.MapPut("/api/users/me/display-name", async (
     UpdateDisplayNameRequest request,
     ClaimsPrincipal principal,
@@ -156,6 +176,73 @@ app.MapPut("/api/users/me/display-name", async (
     await events.PublishAsync(new UserProfileUpdated(user.Id, user.Handle, user.DisplayName, DateTimeOffset.UtcNow), ct);
     return Results.NoContent();
 }).RequireAuthorization();
+
+app.MapPost("/api/password-reset-requests", async (
+    PasswordResetRequest request,
+    IMongoCollection<UserDocument> users,
+    IMongoCollection<PasswordResetTokenDocument> tokens,
+    IEmailSender emailSender,
+    IConfiguration configuration,
+    CancellationToken ct) =>
+{
+    var email = request.Email?.Trim().ToLowerInvariant();
+    if (!string.IsNullOrWhiteSpace(email))
+    {
+        var user = await users.Find(u => u.Email == email).FirstOrDefaultAsync(ct);
+        if (user is not null)
+        {
+            var tokenDoc = new PasswordResetTokenDocument
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Token = Guid.NewGuid().ToString("N"),
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15),
+                Consumed = false
+            };
+            await tokens.InsertOneAsync(tokenDoc, cancellationToken: ct);
+            var baseUrl = configuration["PasswordReset:BaseUrl"] ?? "http://localhost:5106";
+            var resetLink = $"{baseUrl}/reset-password?token={tokenDoc.Token}";
+            await emailSender.SendAsync(user.Email, "Reset your password",
+                $"Click here to reset your password: {resetLink}");
+        }
+    }
+    return Results.NoContent();
+});
+
+app.MapPost("/api/password-resets", async (
+    ResetPasswordRequest request,
+    IMongoCollection<UserDocument> users,
+    IMongoCollection<PasswordResetTokenDocument> tokens,
+    PasswordHasher<UserDocument> hasher,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.NewPassword))
+        return Results.BadRequest(new { error = "Token and new password are required." });
+
+    if (request.NewPassword.Length < 8 || !request.NewPassword.Any(char.IsDigit))
+        return Results.BadRequest(new { error = "Password must be at least 8 characters and contain at least one digit." });
+
+    var tokenDoc = await tokens.Find(t => t.Token == request.Token).FirstOrDefaultAsync(ct);
+    if (tokenDoc is null || tokenDoc.Consumed || tokenDoc.ExpiresAt < DateTimeOffset.UtcNow)
+        return Results.BadRequest(new { error = "Token is invalid or has expired." });
+
+    var user = await users.Find(u => u.Id == tokenDoc.UserId).FirstOrDefaultAsync(ct);
+    if (user is null)
+        return Results.BadRequest(new { error = "Token is invalid or has expired." });
+
+    var newHash = hasher.HashPassword(user, request.NewPassword);
+    await users.UpdateOneAsync(u => u.Id == user.Id,
+        Builders<UserDocument>.Update.Set(u => u.PasswordHash, newHash), cancellationToken: ct);
+    await tokens.UpdateOneAsync(t => t.Id == tokenDoc.Id,
+        Builders<PasswordResetTokenDocument>.Update.Set(t => t.Consumed, true), cancellationToken: ct);
+
+    return Results.NoContent();
+});
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapGet("/dev/emails", (InMemoryEmailSender sender) => Results.Ok(sender.Messages));
+}
 
 app.Run();
 
@@ -203,6 +290,41 @@ public sealed record LoginRequest(string Email, string Password);
 public sealed record UpdateDisplayNameRequest(string DisplayName);
 public sealed record TokenResponse(string Token, Guid UserId, string Username, string Handle, string DisplayName);
 public sealed record UserProfileDto(Guid UserId, string Username, string Handle, string DisplayName, DateTimeOffset RegisteredAt, int FollowerCount, int FollowingCount, bool IsOwnProfile, bool IsFollowedByMe);
+public sealed record UserSearchResultDto(Guid UserId, string Handle, string DisplayName);
+public sealed record PasswordResetRequest(string Email);
+public sealed record ResetPasswordRequest(string Token, string NewPassword);
+
+public sealed class PasswordResetTokenDocument
+{
+    [BsonId]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid Id { get; set; }
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid UserId { get; set; }
+    public string Token { get; set; } = "";
+    public DateTimeOffset ExpiresAt { get; set; }
+    public bool Consumed { get; set; }
+}
+
+public interface IEmailSender
+{
+    Task SendAsync(string to, string subject, string body);
+}
+
+public sealed class InMemoryEmailSender : IEmailSender
+{
+    private readonly List<EmailMessage> _messages = [];
+
+    public Task SendAsync(string to, string subject, string body)
+    {
+        _messages.Add(new EmailMessage(to, subject, body, DateTimeOffset.UtcNow));
+        return Task.CompletedTask;
+    }
+
+    public IReadOnlyList<EmailMessage> Messages => _messages.AsReadOnly();
+}
+
+public sealed record EmailMessage(string To, string Subject, string Body, DateTimeOffset SentAt);
 
 public static class ClaimsPrincipalExtensions
 {
