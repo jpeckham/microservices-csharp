@@ -5,18 +5,33 @@
 
 <section class="auth">
     <div class="auth-panel">
-        <h1>Register</h1>
-        <p>Create a profile and start posting.</p>
-        <input @bind="_displayName" placeholder="Display name" />
-        <input @bind="_handle" placeholder="Handle" />
-        <input @bind="_email" placeholder="Email" />
-        <input @bind="_password" placeholder="Password" type="password" />
-        <button @onclick="RegisterAsync">Register</button>
-        @if (!string.IsNullOrWhiteSpace(_error))
+        @if (_pendingRegistrationId is null)
         {
-            <p class="field-message">@_error</p>
+            <h1>Register</h1>
+            <p>Create a profile and start posting.</p>
+            <input @bind="_displayName" placeholder="Display name" />
+            <input @bind="_handle" placeholder="Handle" />
+            <input @bind="_email" placeholder="Email" />
+            <input @bind="_password" placeholder="Password" type="password" />
+            <button @onclick="StartRegistrationAsync">Register</button>
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <p class="field-message">@_error</p>
+            }
+            <p class="switch">Already registered? <a href="/login">Log in</a></p>
         }
-        <p class="switch">Already registered? <a href="/login">Log in</a></p>
+        else
+        {
+            <h1>Check your email</h1>
+            <p>We sent a 6-digit code to <strong>@_email</strong>. Enter it below to complete registration.</p>
+            <input @bind="_verificationCode" placeholder="6-digit code" maxlength="6" inputmode="numeric" />
+            <button @onclick="VerifyAsync">Verify</button>
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <p class="field-message">@_error</p>
+            }
+            <p class="switch"><button class="link-button" @onclick="GoBack">Use a different email</button></p>
+        }
     </div>
 </section>
 
@@ -25,11 +40,33 @@
     private string _handle = "";
     private string _email = "";
     private string _password = "";
+    private string _verificationCode = "";
     private string? _error;
+    private Guid? _pendingRegistrationId;
 
-    private async Task RegisterAsync()
+    private async Task StartRegistrationAsync()
     {
-        _error = await Auth.RegisterAsync(_email, _password, _handle, _displayName);
-        if (_error is null) Nav.NavigateTo("/login");
+        _error = null;
+        var (id, error) = await Auth.StartRegistrationAsync(_email, _password, _handle, _displayName);
+        if (error is not null)
+        {
+            _error = error;
+            return;
+        }
+        _pendingRegistrationId = id;
+    }
+
+    private async Task VerifyAsync()
+    {
+        _error = null;
+        _error = await Auth.VerifyRegistrationAsync(_pendingRegistrationId!.Value, _verificationCode);
+        if (_error is null) Nav.NavigateTo("/");
+    }
+
+    private void GoBack()
+    {
+        _pendingRegistrationId = null;
+        _verificationCode = "";
+        _error = null;
     }
 }

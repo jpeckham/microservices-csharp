@@ -41,6 +41,24 @@ public sealed class AuthApi(HttpClient identity, SessionState session)
         return response.IsSuccessStatusCode ? null : await ReadErrorAsync(response, "Registration failed.");
     }
 
+    public async Task<(Guid? PendingRegistrationId, string? Error)> StartRegistrationAsync(string email, string password, string handle, string displayName)
+    {
+        var response = await identity.PostAsJsonAsync("api/registrations", new { email, password, handle, displayName });
+        if (!response.IsSuccessStatusCode) return (null, await ReadErrorAsync(response, "Registration failed."));
+        var result = await response.Content.ReadFromJsonAsync<PendingRegistrationResponse>();
+        return (result?.PendingRegistrationId, null);
+    }
+
+    public async Task<string?> VerifyRegistrationAsync(Guid pendingRegistrationId, string code)
+    {
+        var response = await identity.PostAsJsonAsync("api/registrations/verify", new { pendingRegistrationId, code });
+        if (!response.IsSuccessStatusCode) return await ReadErrorAsync(response, "Verification failed.");
+        var token = await response.Content.ReadFromJsonAsync<TokenResponse>();
+        if (token is null) return "Verification failed.";
+        await session.SaveAsync(token);
+        return null;
+    }
+
     public async Task<string?> LoginAsync(string email, string password)
     {
         var response = await identity.PostAsJsonAsync("api/users/login", new { email, password });
@@ -232,3 +250,4 @@ public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Lim
 public sealed record CommentDto(Guid CommentId, Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset CreatedAt);
 public sealed record ErrorResponse(string Error);
 public sealed record UserSearchResultDto(Guid UserId, string Handle, string DisplayName);
+public sealed record PendingRegistrationResponse(Guid PendingRegistrationId);

@@ -25,6 +25,7 @@ builder.Services.AddSingleton(_ =>
 });
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<UserDocument>("users"));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<PasswordResetTokenDocument>("passwordResetTokens"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<PendingRegistrationDocument>("pendingRegistrations"));
 builder.Services.AddSingleton<PasswordHasher<UserDocument>>();
 builder.Services.AddSingleton<InMemoryEmailSender>();
 builder.Services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<InMemoryEmailSender>());
@@ -239,6 +240,92 @@ app.MapPost("/api/password-resets", async (
     return Results.NoContent();
 });
 
+app.MapPost("/api/registrations", async (
+    StartRegistrationRequest request,
+    IMongoCollection<UserDocument> users,
+    IMongoCollection<PendingRegistrationDocument> pendingRegistrations,
+    PasswordHasher<UserDocument> hasher,
+    IEmailSender emailSender,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Email) ||
+        string.IsNullOrWhiteSpace(request.Password) ||
+        string.IsNullOrWhiteSpace(request.Handle))
+    {
+        return Results.BadRequest(new { error = "Email, password, and handle are required." });
+    }
+
+    var email = request.Email.Trim().ToLowerInvariant();
+    var handle = NormalizeHandle(request.Handle);
+
+    var existingUser = await users.Find(u => u.Email == email || u.Handle == handle).AnyAsync(ct);
+    if (existingUser)
+        return Results.Conflict(new { error = "A user with that email or handle already exists." });
+
+    var existingPending = await pendingRegistrations.Find(p => p.Email == email || p.Handle == handle).AnyAsync(ct);
+    if (existingPending)
+        return Results.Conflict(new { error = "A user with that email or handle already exists." });
+
+    var code = Random.Shared.Next(100000, 999999).ToString();
+    var tempUser = new UserDocument { Id = Guid.NewGuid() };
+    var passwordHash = hasher.HashPassword(tempUser, request.Password);
+
+    var pending = new PendingRegistrationDocument
+    {
+        Id = Guid.NewGuid(),
+        Handle = handle,
+        Email = email,
+        DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? handle.TrimStart('@') : request.DisplayName.Trim(),
+        PasswordHash = passwordHash,
+        VerificationCode = code,
+        ExpiresAt = DateTimeOffset.UtcNow.AddHours(24),
+        CreatedAt = DateTimeOffset.UtcNow
+    };
+
+    await pendingRegistrations.InsertOneAsync(pending, cancellationToken: ct);
+    await emailSender.SendAsync(email, "Verify your registration",
+        $"Your verification code is: {code}");
+
+    return Results.Accepted(null, new { pendingRegistrationId = pending.Id });
+});
+
+app.MapPost("/api/registrations/verify", async (
+    VerifyRegistrationRequest request,
+    IMongoCollection<UserDocument> users,
+    IMongoCollection<PendingRegistrationDocument> pendingRegistrations,
+    IEventPublisher events,
+    IConfiguration configuration,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Code))
+        return Results.BadRequest(new { error = "Verification code is required." });
+
+    var pending = await pendingRegistrations.Find(p => p.Id == request.PendingRegistrationId).FirstOrDefaultAsync(ct);
+    if (pending is null || pending.ExpiresAt < DateTimeOffset.UtcNow)
+        return Results.BadRequest(new { error = "Registration not found or has expired." });
+
+    if (pending.VerificationCode != request.Code)
+        return Results.BadRequest(new { error = "Invalid verification code." });
+
+    var user = new UserDocument
+    {
+        Id = Guid.NewGuid(),
+        Email = pending.Email,
+        Username = pending.Handle.TrimStart('@'),
+        Handle = pending.Handle,
+        DisplayName = pending.DisplayName,
+        PasswordHash = pending.PasswordHash,
+        RegisteredAt = DateTimeOffset.UtcNow
+    };
+
+    await users.InsertOneAsync(user, cancellationToken: ct);
+    await pendingRegistrations.DeleteOneAsync(p => p.Id == pending.Id, ct);
+    await events.PublishAsync(new UserCreated(user.Id, user.Username, user.Handle, user.DisplayName, DateTimeOffset.UtcNow), ct);
+
+    return Results.Created($"/api/users/{user.Id}",
+        new TokenResponse(CreateToken(user, configuration), user.Id, user.Username, user.Handle, user.DisplayName));
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.MapGet("/dev/emails", (InMemoryEmailSender sender) => Results.Ok(sender.Messages));
@@ -293,6 +380,22 @@ public sealed record UserProfileDto(Guid UserId, string Username, string Handle,
 public sealed record UserSearchResultDto(Guid UserId, string Handle, string DisplayName);
 public sealed record PasswordResetRequest(string Email);
 public sealed record ResetPasswordRequest(string Token, string NewPassword);
+public sealed record StartRegistrationRequest(string Email, string Password, string Handle, string? DisplayName);
+public sealed record VerifyRegistrationRequest(Guid PendingRegistrationId, string Code);
+
+public sealed class PendingRegistrationDocument
+{
+    [BsonId]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid Id { get; set; }
+    public string Handle { get; set; } = "";
+    public string Email { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string PasswordHash { get; set; } = "";
+    public string VerificationCode { get; set; } = "";
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
 
 public sealed class PasswordResetTokenDocument
 {
