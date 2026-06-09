@@ -154,4 +154,14 @@ public sealed class FeedApiTests(IntegrationFixture fx)
         var entries = await response.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
         Assert.All(entries!, e => Assert.Equal(userId, e.AuthorId));
     }
+
+    [Fact]
+    public async Task HealthCheck_returns_healthy()
+    {
+        var response = await fx.Feed.GetAsync("/health");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal("Healthy", body);
+    }
 }

@@ -36,6 +36,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -110,6 +111,7 @@ app.MapGet("/api/users/{userId:guid}/counts", async (Guid userId, IMongoCollecti
     return Results.Ok(new FollowCountsDto((int)followers, (int)following));
 });
 
+app.MapHealthChecks("/health");
 app.Run();
 
 public sealed class FollowDocument

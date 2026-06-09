@@ -211,4 +211,14 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
         var idx = emailBody.IndexOf("?token=", StringComparison.Ordinal);
         return idx >= 0 ? emailBody[(idx + 7)..] : throw new InvalidOperationException("Token not found in email body.");
     }
+
+    [Fact]
+    public async Task HealthCheck_returns_healthy()
+    {
+        var response = await fx.Identity.GetAsync("/health");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal("Healthy", body);
+    }
 }

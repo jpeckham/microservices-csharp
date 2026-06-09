@@ -46,6 +46,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -331,6 +332,7 @@ if (app.Environment.IsDevelopment())
     app.MapGet("/dev/emails", (InMemoryEmailSender sender) => Results.Ok(sender.Messages));
 }
 
+app.MapHealthChecks("/health");
 app.Run();
 
 static string NormalizeHandle(string handle)

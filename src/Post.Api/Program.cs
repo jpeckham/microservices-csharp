@@ -38,6 +38,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -157,6 +158,7 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
     return Results.Ok(new SearchResultsDto(result.Select(ToDto).ToList(), q ?? "", limit, offset));
 });
 
+app.MapHealthChecks("/health");
 app.Run();
 
 static PostDto ToDto(PostDocument post) =>

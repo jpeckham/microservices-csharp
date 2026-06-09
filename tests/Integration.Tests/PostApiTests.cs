@@ -294,6 +294,16 @@ public sealed class PostApiTests(IntegrationFixture fx)
         Assert.Contains("grace", post!.Mentions!);
         Assert.Contains("dotnet", post.Hashtags!);
     }
+
+    [Fact]
+    public async Task HealthCheck_returns_healthy()
+    {
+        var response = await fx.Post.GetAsync("/health");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal("Healthy", body);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);

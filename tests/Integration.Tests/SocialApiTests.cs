@@ -79,4 +79,14 @@ public sealed class SocialApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task HealthCheck_returns_healthy()
+    {
+        var response = await fx.Social.GetAsync("/health");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal("Healthy", body);
+    }
 }

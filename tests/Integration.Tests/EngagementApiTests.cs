@@ -119,6 +119,16 @@ public sealed class EngagementApiTests(IntegrationFixture fx)
         Assert.Equal(1, summary!.LikeCount);
         Assert.Equal(1, summary.CommentCount);
     }
+
+    [Fact]
+    public async Task HealthCheck_returns_healthy()
+    {
+        var response = await fx.Engagement.GetAsync("/health");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal("Healthy", body);
+    }
 }
 
 file sealed record LikeCountDto(int LikeCount);

@@ -38,6 +38,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -139,6 +140,7 @@ app.MapGet("/api/posts/{postId:guid}/summary", async (
     return Results.Ok(new EngagementSummaryDto((int)likeCount, (int)commentCount, likedByMe));
 });
 
+app.MapHealthChecks("/health");
 app.Run();
 
 static CommentDto ToDto(CommentDocument comment) =>

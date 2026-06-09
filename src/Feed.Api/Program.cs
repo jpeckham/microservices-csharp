@@ -37,6 +37,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -162,6 +163,7 @@ app.MapPost("/events/CommentAdded", async (CommentAdded integrationEvent, IMongo
     return Results.Accepted();
 });
 
+app.MapHealthChecks("/health");
 app.Run();
 
 static FeedEntryDto ToDto(FeedEntryDocument entry) =>
