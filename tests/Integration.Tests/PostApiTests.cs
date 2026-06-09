@@ -205,6 +205,95 @@ public sealed class PostApiTests(IntegrationFixture fx)
         Assert.NotNull(fetched!.Hashtags);
         Assert.Contains("xunit", fetched.Hashtags);
     }
+
+    [Fact]
+    public async Task CreatePost_with_mentions_returns_extracted_mentions()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hey @Alice and @Bob, check this out!" });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.Mentions);
+        Assert.Contains("alice", post.Mentions);
+        Assert.Contains("bob", post.Mentions);
+    }
+
+    [Fact]
+    public async Task CreatePost_without_mentions_returns_empty_mention_list()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Just a plain post." });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.Mentions);
+        Assert.Empty(post.Mentions);
+    }
+
+    [Fact]
+    public async Task CreatePost_with_duplicate_mentions_returns_distinct_mentions()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "@Carol is great! @carol rocks!" });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.Mentions);
+        Assert.Single(post.Mentions);
+        Assert.Equal("carol", post.Mentions![0]);
+    }
+
+    [Fact]
+    public async Task UpdatePost_replaces_mentions_with_new_content()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hello @dave!" });
+        var created = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var update = fx.AuthorizedRequest(HttpMethod.Put, $"/api/posts/{created!.PostId}", session.Token, new { content = "Now mentioning @eve instead" });
+        var response = await fx.Post.SendAsync(update);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.DoesNotContain("dave", updated!.Mentions ?? []);
+        Assert.Contains("eve", updated.Mentions!);
+    }
+
+    [Fact]
+    public async Task GetPost_returns_mentions()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Shoutout to @frank today!" });
+        var created = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        var response = await fx.Post.GetAsync($"/api/posts/{created!.PostId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var fetched = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(fetched!.Mentions);
+        Assert.Contains("frank", fetched.Mentions);
+    }
+
+    [Fact]
+    public async Task CreatePost_with_both_hashtags_and_mentions_extracts_both()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hey @Grace, check out #dotnet!" });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.Contains("grace", post!.Mentions!);
+        Assert.Contains("dotnet", post.Hashtags!);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);

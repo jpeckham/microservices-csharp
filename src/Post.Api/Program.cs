@@ -71,6 +71,7 @@ app.MapPost("/api/posts", async (
         AuthorDisplayName = principal.FindFirstValue(AuthConstants.DisplayNameClaim) ?? "Unknown user",
         Content = content,
         Hashtags = HashtagExtractor.Extract(content),
+        Mentions = MentionExtractor.Extract(content),
         PostedAt = DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow
     };
@@ -97,6 +98,7 @@ app.MapPut("/api/posts/{id:guid}", async (
     var update = Builders<PostDocument>.Update
         .Set(p => p.Content, updatedContent)
         .Set(p => p.Hashtags, HashtagExtractor.Extract(updatedContent))
+        .Set(p => p.Mentions, MentionExtractor.Extract(updatedContent))
         .Set(p => p.UpdatedAt, DateTimeOffset.UtcNow);
     var post = await posts.FindOneAndUpdateAsync(
         p => p.Id == id && p.AuthorId == userId,
@@ -158,7 +160,7 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
 app.Run();
 
 static PostDto ToDto(PostDocument post) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags);
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions);
 
 public sealed class PostDocument
 {
@@ -171,18 +173,30 @@ public sealed class PostDocument
     public string AuthorDisplayName { get; set; } = "";
     public string Content { get; set; } = "";
     public List<string> Hashtags { get; set; } = [];
+    public List<string> Mentions { get; set; } = [];
     public DateTimeOffset PostedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
 public static class HashtagExtractor
 {
     private static readonly Regex Pattern = new(@"#([a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled);
+
+    public static List<string> Extract(string content) =>
+        Pattern.Matches(content)
+            .Select(m => m.Groups[1].Value.ToLowerInvariant())
+            .Distinct()
+            .ToList();
+}
+
+public static class MentionExtractor
+{
+    private static readonly Regex Pattern = new(@"@([a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled);
 
     public static List<string> Extract(string content) =>
         Pattern.Matches(content)
