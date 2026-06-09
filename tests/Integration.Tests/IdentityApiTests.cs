@@ -292,4 +292,44 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Register_with_short_password_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = $"{id}@test.com", password = "short1", handle = id, displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_with_password_without_digit_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = $"{id}@test.com", password = "NoDigitsHere!", handle = id, displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_with_short_password_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = $"{id}@test.com", password = "short1", handle = id, displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_with_password_without_digit_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = $"{id}@test.com", password = "NoDigitsAtAll!", handle = id, displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

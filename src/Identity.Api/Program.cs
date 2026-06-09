@@ -73,6 +73,9 @@ app.MapPost("/api/users/register", async (
         return Results.BadRequest(new { error = "Email, password, and handle are required." });
     }
 
+    if (request.Password.Length < 8 || !request.Password.Any(char.IsDigit))
+        return Results.BadRequest(new { error = "Password must be at least 8 characters and contain at least one digit." });
+
     var handle = NormalizeHandle(request.Handle);
     var existing = await users.Find(u => u.Email == request.Email || u.Handle == handle).AnyAsync(ct);
     if (existing)
@@ -255,6 +258,9 @@ app.MapPost("/api/registrations", async (
     {
         return Results.BadRequest(new { error = "Email, password, and handle are required." });
     }
+
+    if (request.Password.Length < 8 || !request.Password.Any(char.IsDigit))
+        return Results.BadRequest(new { error = "Password must be at least 8 characters and contain at least one digit." });
 
     var email = request.Email.Trim().ToLowerInvariant();
     var handle = NormalizeHandle(request.Handle);
