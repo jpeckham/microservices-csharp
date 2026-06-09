@@ -327,6 +327,34 @@ app.MapPost("/api/registrations/verify", async (
         new TokenResponse(CreateToken(user, configuration), user.Id, user.Username, user.Handle, user.DisplayName));
 });
 
+app.MapPut("/api/users/me/password", async (
+    ChangePasswordRequest request,
+    ClaimsPrincipal principal,
+    IMongoCollection<UserDocument> users,
+    PasswordHasher<UserDocument> hasher,
+    CancellationToken ct) =>
+{
+    var userId = principal.GetUserId();
+    if (userId is null) return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(request.NewPassword) ||
+        request.NewPassword.Length < 8 ||
+        !request.NewPassword.Any(char.IsDigit))
+        return Results.BadRequest(new { error = "New password must be at least 8 characters and contain at least one digit." });
+
+    var user = await users.Find(u => u.Id == userId).FirstOrDefaultAsync(ct);
+    if (user is null) return Results.Unauthorized();
+
+    if (hasher.VerifyHashedPassword(user, user.PasswordHash, request.CurrentPassword) == PasswordVerificationResult.Failed)
+        return Results.BadRequest(new { error = "Current password is incorrect." });
+
+    var newHash = hasher.HashPassword(user, request.NewPassword);
+    await users.UpdateOneAsync(u => u.Id == userId,
+        Builders<UserDocument>.Update.Set(u => u.PasswordHash, newHash), cancellationToken: ct);
+
+    return Results.NoContent();
+}).RequireAuthorization();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapGet("/dev/emails", (InMemoryEmailSender sender) => Results.Ok(sender.Messages));
@@ -382,6 +410,7 @@ public sealed record UserProfileDto(Guid UserId, string Username, string Handle,
 public sealed record UserSearchResultDto(Guid UserId, string Handle, string DisplayName);
 public sealed record PasswordResetRequest(string Email);
 public sealed record ResetPasswordRequest(string Token, string NewPassword);
+public sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 public sealed record StartRegistrationRequest(string Email, string Password, string Handle, string? DisplayName);
 public sealed record VerifyRegistrationRequest(Guid PendingRegistrationId, string Code);
 

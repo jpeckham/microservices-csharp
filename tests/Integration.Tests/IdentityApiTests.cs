@@ -221,4 +221,75 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
         var body = await response.Content.ReadAsStringAsync();
         Assert.Equal("Healthy", body);
     }
+
+    [Fact]
+    public async Task ChangePassword_without_auth_returns_401()
+    {
+        var response = await fx.Identity.PutAsJsonAsync("/api/users/me/password",
+            new { currentPassword = "Pass123!", newPassword = "NewPass1!" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_with_valid_credentials_returns_204()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Put, "/api/users/me/password", session.Token,
+            new { currentPassword = "Pass123!", newPassword = "NewPass1!" });
+
+        var response = await fx.Identity.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_allows_login_with_new_password()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var changeReq = fx.AuthorizedRequest(HttpMethod.Put, "/api/users/me/password", session.Token,
+            new { currentPassword = "Pass123!", newPassword = "Changed9!" });
+        (await fx.Identity.SendAsync(changeReq)).EnsureSuccessStatusCode();
+
+        var login = await fx.Identity.PostAsJsonAsync("/api/users/login",
+            new { email = $"{session.Handle}@test.com", password = "Changed9!" });
+
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_wrong_current_password_returns_400()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Put, "/api/users/me/password", session.Token,
+            new { currentPassword = "WrongPass1!", newPassword = "NewPass1!" });
+
+        var response = await fx.Identity.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_weak_new_password_returns_400()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Put, "/api/users/me/password", session.Token,
+            new { currentPassword = "Pass123!", newPassword = "short" });
+
+        var response = await fx.Identity.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_new_password_without_digit_returns_400()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Put, "/api/users/me/password", session.Token,
+            new { currentPassword = "Pass123!", newPassword = "NoDigitsHere!" });
+
+        var response = await fx.Identity.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }
