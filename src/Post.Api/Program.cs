@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using MongoDB.Bson;
@@ -61,13 +62,15 @@ app.MapPost("/api/posts", async (
     if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 280)
         return Results.BadRequest(new { error = "Post content must be between 1 and 280 characters." });
 
+    var content = request.Content.Trim();
     var post = new PostDocument
     {
         Id = Guid.NewGuid(),
         AuthorId = userId.Value,
         AuthorHandle = principal.FindFirstValue(AuthConstants.HandleClaim) ?? $"@{userId.Value.ToString()[..8]}",
         AuthorDisplayName = principal.FindFirstValue(AuthConstants.DisplayNameClaim) ?? "Unknown user",
-        Content = request.Content.Trim(),
+        Content = content,
+        Hashtags = HashtagExtractor.Extract(content),
         PostedAt = DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow
     };
@@ -90,8 +93,10 @@ app.MapPut("/api/posts/{id:guid}", async (
     if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 280)
         return Results.BadRequest(new { error = "Post content must be between 1 and 280 characters." });
 
+    var updatedContent = request.Content.Trim();
     var update = Builders<PostDocument>.Update
-        .Set(p => p.Content, request.Content.Trim())
+        .Set(p => p.Content, updatedContent)
+        .Set(p => p.Hashtags, HashtagExtractor.Extract(updatedContent))
         .Set(p => p.UpdatedAt, DateTimeOffset.UtcNow);
     var post = await posts.FindOneAndUpdateAsync(
         p => p.Id == id && p.AuthorId == userId,
@@ -153,7 +158,7 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
 app.Run();
 
 static PostDto ToDto(PostDocument post) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt);
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags);
 
 public sealed class PostDocument
 {
@@ -165,14 +170,26 @@ public sealed class PostDocument
     public string AuthorHandle { get; set; } = "";
     public string AuthorDisplayName { get; set; } = "";
     public string Content { get; set; } = "";
+    public List<string> Hashtags { get; set; } = [];
     public DateTimeOffset PostedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
+
+public static class HashtagExtractor
+{
+    private static readonly Regex Pattern = new(@"#([a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled);
+
+    public static List<string> Extract(string content) =>
+        Pattern.Matches(content)
+            .Select(m => m.Groups[1].Value.ToLowerInvariant())
+            .Distinct()
+            .ToList();
+}
 
 public static class ClaimsPrincipalExtensions
 {

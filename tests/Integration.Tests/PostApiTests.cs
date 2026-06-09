@@ -130,6 +130,81 @@ public sealed class PostApiTests(IntegrationFixture fx)
         Assert.NotEmpty(results!.Posts);
         Assert.Contains(results.Posts, p => p.Content.Contains(unique));
     }
+
+    [Fact]
+    public async Task CreatePost_with_hashtags_returns_extracted_hashtags()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Loving #Blazor and #dotnet today!" });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.Hashtags);
+        Assert.Contains("blazor", post.Hashtags);
+        Assert.Contains("dotnet", post.Hashtags);
+    }
+
+    [Fact]
+    public async Task CreatePost_without_hashtags_returns_empty_hashtag_list()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "No tags here at all." });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.Hashtags);
+        Assert.Empty(post.Hashtags);
+    }
+
+    [Fact]
+    public async Task CreatePost_with_duplicate_hashtags_returns_distinct_tags()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "#Blazor is great! #blazor rocks!" });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.Hashtags);
+        Assert.Single(post.Hashtags);
+        Assert.Equal("blazor", post.Hashtags![0]);
+    }
+
+    [Fact]
+    public async Task UpdatePost_replaces_hashtags_with_new_content()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hello #csharp world" });
+        var created = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var update = fx.AuthorizedRequest(HttpMethod.Put, $"/api/posts/{created!.PostId}", session.Token, new { content = "Now talking about #dotnet instead" });
+        var response = await fx.Post.SendAsync(update);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.DoesNotContain("csharp", updated!.Hashtags ?? []);
+        Assert.Contains("dotnet", updated.Hashtags!);
+    }
+
+    [Fact]
+    public async Task GetPost_returns_hashtags()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Check out #xunit for testing!" });
+        var created = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        var response = await fx.Post.GetAsync($"/api/posts/{created!.PostId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var fetched = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(fetched!.Hashtags);
+        Assert.Contains("xunit", fetched.Hashtags);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
