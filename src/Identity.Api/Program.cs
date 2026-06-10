@@ -141,7 +141,7 @@ app.MapGet("/api/users/{id:guid}", async (Guid id, IMongoCollection<UserDocument
 {
     var user = await users.Find(u => u.Id == id).FirstOrDefaultAsync(ct);
     return user is null ? Results.NotFound(new { error = "User not found." }) : Results.Ok(ToProfile(user, null, 0, 0));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/users/by-handle/{handle}", async (string handle, ClaimsPrincipal principal, IMongoCollection<UserDocument> users, CancellationToken ct) =>
 {
@@ -150,7 +150,7 @@ app.MapGet("/api/users/by-handle/{handle}", async (string handle, ClaimsPrincipa
     return user is null
         ? Results.NotFound(new { error = "Profile not found." })
         : Results.Ok(ToProfile(user, principal.GetUserId(), 0, 0));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/users/search", async (string? q, int limit, int offset, IMongoCollection<UserDocument> users, CancellationToken ct) =>
 {

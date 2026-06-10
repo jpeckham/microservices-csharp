@@ -84,11 +84,30 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
     {
         var session = await fx.RegisterAndLoginAsync();
 
-        var response = await fx.Identity.GetAsync($"/api/users/by-handle/{session.Handle}");
+        using var request = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/{session.Handle}", session.Token);
+        var response = await fx.Identity.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var profile = await response.Content.ReadFromJsonAsync<UserProfileDto>();
         Assert.Equal(session.Handle, profile!.Handle.TrimStart('@'));
+    }
+
+    [Fact]
+    public async Task GetByHandle_without_auth_returns_401()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        var response = await fx.Identity.GetAsync($"/api/users/by-handle/{session.Handle}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetById_without_auth_returns_401()
+    {
+        var response = await fx.Identity.GetAsync($"/api/users/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     // --- Password reset ---
