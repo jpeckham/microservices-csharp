@@ -64,6 +64,7 @@ app.MapPost("/api/users/register", async (
     IMongoCollection<UserDocument> users,
     PasswordHasher<UserDocument> hasher,
     IEventPublisher events,
+    IConfiguration configuration,
     CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(request.Email) ||
@@ -107,7 +108,7 @@ app.MapPost("/api/users/register", async (
     await users.InsertOneAsync(user, cancellationToken: ct);
     await events.PublishAsync(new UserCreated(user.Id, user.Username, user.Handle, user.DisplayName, DateTimeOffset.UtcNow), ct);
 
-    return Results.Created($"/api/users/{user.Id}", ToProfile(user, null, 0, 0));
+    return Results.Created($"/api/users/{user.Id}", new TokenResponse(CreateToken(user, configuration), user.Id, user.Username, user.Handle, user.DisplayName));
 });
 
 app.MapPost("/api/users/login", async (

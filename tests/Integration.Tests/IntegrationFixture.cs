@@ -64,12 +64,8 @@ public sealed class IntegrationFixture : IAsyncLifetime
             new { email, password = "Pass123!", handle, displayName = $"User {id}" });
         reg.EnsureSuccessStatusCode();
 
-        var login = await Identity.PostAsJsonAsync("/api/users/login",
-            new { email, password = "Pass123!" });
-        login.EnsureSuccessStatusCode();
-
-        var token = await login.Content.ReadFromJsonAsync<TokenDto>()
-            ?? throw new InvalidOperationException("Login returned no token.");
+        var token = await reg.Content.ReadFromJsonAsync<TokenDto>()
+            ?? throw new InvalidOperationException("Register returned no token.");
 
         return new AuthSession(token.UserId, token.Token, handle, $"User {id}");
     }

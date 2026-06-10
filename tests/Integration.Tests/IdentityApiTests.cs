@@ -6,13 +6,18 @@ namespace Integration.Tests;
 public sealed class IdentityApiTests(IntegrationFixture fx)
 {
     [Fact]
-    public async Task Register_new_user_returns_201()
+    public async Task Register_new_user_returns_201_with_token()
     {
         var id = Guid.NewGuid().ToString("N")[..10];
         var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
             new { email = $"{id}@test.com", password = "Pass123!", handle = id, displayName = $"User {id}" });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<TokenDto>();
+        Assert.NotNull(body);
+        Assert.False(string.IsNullOrWhiteSpace(body.Token));
+        Assert.NotEqual(Guid.Empty, body.UserId);
+        Assert.Equal($"@{id}", body.Handle);
     }
 
     [Fact]
