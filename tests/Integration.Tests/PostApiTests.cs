@@ -1251,6 +1251,83 @@ public sealed class PostApiTests(IntegrationFixture fx)
         Assert.NotNull(repostResult!.QuotedPost);
         Assert.Equal($"Searchable original {unique}", repostResult.QuotedPost!.Content);
     }
+
+    [Fact]
+    public async Task GetPost_reply_includes_reply_target_with_parent_content()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Parent post content" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", replier.Token, new { content = "Replying here" });
+        var reply = await (await fx.Post.SendAsync(replyReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{reply!.PostId}", replier.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.NotNull(fetched!.ReplyTarget);
+        Assert.Equal(parent.PostId, fetched.ReplyTarget!.PostId);
+        Assert.Equal("Parent post content", fetched.ReplyTarget.Content);
+        Assert.Contains(author.Handle, fetched.ReplyTarget.AuthorHandle);
+    }
+
+    [Fact]
+    public async Task GetPost_non_reply_has_null_reply_target()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Top-level post" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post!.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Null(fetched!.ReplyTarget);
+    }
+
+    [Fact]
+    public async Task GetPostsByUser_replies_include_reply_target()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "The parent post" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", replier.Token, new { content = "My reply" });
+        var reply = await (await fx.Post.SendAsync(replyReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var listReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/by-user/{replier.UserId}?limit=10&offset=0", replier.Token);
+        var posts = await (await fx.Post.SendAsync(listReq)).Content.ReadFromJsonAsync<List<PostDto>>();
+
+        var replyInList = posts!.First(p => p.PostId == reply!.PostId);
+        Assert.NotNull(replyInList.ReplyTarget);
+        Assert.Equal(parent.PostId, replyInList.ReplyTarget!.PostId);
+        Assert.Equal("The parent post", replyInList.ReplyTarget.Content);
+    }
+
+    [Fact]
+    public async Task GetPost_reply_target_is_null_when_parent_is_deleted()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Parent to delete" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", replier.Token, new { content = "A reply" });
+        var reply = await (await fx.Post.SendAsync(replyReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{parent.PostId}", author.Token);
+        await fx.Post.SendAsync(deleteReq);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{reply!.PostId}", replier.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Null(fetched!.ReplyTarget);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);

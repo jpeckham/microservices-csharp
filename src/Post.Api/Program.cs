@@ -201,7 +201,13 @@ app.MapGet("/api/posts/{id:guid}", async (Guid id, ClaimsPrincipal principal, IM
         var original = await posts.Find(p => p.Id == post.OriginalPostId.Value && !p.IsDeleted).FirstOrDefaultAsync(ct);
         if (original is not null) quotedPost = ToQuotedDto(original);
     }
-    return Results.Ok(ToDto(post, repostedByMe, quotedPost));
+    QuotedPostDto? replyTarget = null;
+    if (post.ParentPostId.HasValue)
+    {
+        var parent = await posts.Find(p => p.Id == post.ParentPostId.Value && !p.IsDeleted).FirstOrDefaultAsync(ct);
+        if (parent is not null) replyTarget = ToQuotedDto(parent);
+    }
+    return Results.Ok(ToDto(post, repostedByMe, quotedPost, replyTarget));
 }).RequireAuthorization();
 
 app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, int? offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
@@ -306,7 +312,11 @@ app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, in
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
     var originals = await LoadOriginals(result, posts, ct);
-    return Results.Ok(result.Select(p => ToDto(p, quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
+    var parents = await LoadParents(result, posts, ct);
+    return Results.Ok(result.Select(p => ToDto(
+        p,
+        quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null,
+        replyTarget: p.ParentPostId.HasValue && parents.TryGetValue(p.ParentPostId.Value, out var par) ? ToQuotedDto(par) : null)));
 }).RequireAuthorization();
 
 app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
@@ -382,8 +392,8 @@ static string PrefixReplyContent(string parentAuthorHandle, string body)
     return $"{prefix} {body}";
 }
 
-static PostDto ToDto(PostDocument post, bool repostedByMe = false, QuotedPostDto? quotedPost = null) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, repostedByMe, quotedPost);
+static PostDto ToDto(PostDocument post, bool repostedByMe = false, QuotedPostDto? quotedPost = null, QuotedPostDto? replyTarget = null) =>
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, repostedByMe, quotedPost, replyTarget);
 
 static QuotedPostDto ToQuotedDto(PostDocument post) =>
     new(post.Id, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt);
@@ -394,6 +404,14 @@ static async Task<Dictionary<Guid, PostDocument>> LoadOriginals(List<PostDocumen
     if (ids.Count == 0) return [];
     var originals = await collection.Find(p => ids.Contains(p.Id) && !p.IsDeleted).ToListAsync(ct);
     return originals.ToDictionary(p => p.Id);
+}
+
+static async Task<Dictionary<Guid, PostDocument>> LoadParents(List<PostDocument> posts, IMongoCollection<PostDocument> collection, CancellationToken ct)
+{
+    var ids = posts.Where(p => p.ParentPostId.HasValue).Select(p => p.ParentPostId!.Value).Distinct().ToList();
+    if (ids.Count == 0) return [];
+    var parents = await collection.Find(p => ids.Contains(p.Id) && !p.IsDeleted).ToListAsync(ct);
+    return parents.ToDictionary(p => p.Id);
 }
 
 public sealed class PostDocument
@@ -422,7 +440,7 @@ public sealed class PostDocument
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
 public sealed record QuotedPostDto(Guid PostId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
 public static class HashtagExtractor
