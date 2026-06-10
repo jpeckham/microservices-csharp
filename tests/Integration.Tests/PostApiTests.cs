@@ -331,6 +331,69 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task GetRecentPosts_without_auth_returns_401()
+    {
+        var response = await fx.Post.GetAsync("/api/posts/recent");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetRecentPosts_returns_posts_sorted_newest_first()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var first = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"First post {unique}" });
+        await fx.Post.SendAsync(first);
+        using var second = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"Second post {unique}" });
+        await fx.Post.SendAsync(second);
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/recent?limit=50", session.Token);
+        var response = await fx.Post.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var posts = await response.Content.ReadFromJsonAsync<List<PostDto>>();
+        Assert.NotNull(posts);
+        var myPosts = posts.Where(p => p.Content.Contains(unique)).ToList();
+        Assert.Equal(2, myPosts.Count);
+        Assert.True(myPosts[0].PostedAt >= myPosts[1].PostedAt, "Posts should be sorted newest first.");
+    }
+
+    [Fact]
+    public async Task GetRecentPosts_limit_is_clamped_to_100()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/recent?limit=999", session.Token);
+        var response = await fx.Post.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var posts = await response.Content.ReadFromJsonAsync<List<PostDto>>();
+        Assert.NotNull(posts);
+        Assert.True(posts.Count <= 100, "Limit should be clamped to 100.");
+    }
+
+    [Fact]
+    public async Task GetRecentPosts_default_limit_is_20()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        for (var i = 0; i < 25; i++)
+        {
+            using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"Filler post {i} {Guid.NewGuid():N}" });
+            await fx.Post.SendAsync(create);
+        }
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/recent", session.Token);
+        var response = await fx.Post.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var posts = await response.Content.ReadFromJsonAsync<List<PostDto>>();
+        Assert.NotNull(posts);
+        Assert.True(posts.Count <= 20, "Default limit should be 20.");
+    }
+
+    [Fact]
     public async Task HealthCheck_returns_healthy()
     {
         var response = await fx.Post.GetAsync("/health");

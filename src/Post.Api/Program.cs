@@ -168,6 +168,16 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
     return Results.Ok(new SearchResultsDto(result.Select(ToDto).ToList(), q ?? "", limit, offset));
 });
 
+app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+{
+    var take = Math.Clamp(limit ?? 20, 1, 100);
+    var result = await posts.Find(_ => true)
+        .SortByDescending(p => p.PostedAt)
+        .Limit(take)
+        .ToListAsync(ct);
+    return Results.Ok(result.Select(ToDto));
+}).RequireAuthorization();
+
 app.MapHealthChecks("/health");
 app.Run();
 
