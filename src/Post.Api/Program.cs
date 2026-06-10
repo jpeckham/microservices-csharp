@@ -179,6 +179,18 @@ app.MapGet("/api/posts/{id:guid}", async (Guid id, IMongoCollection<PostDocument
     return post is null ? Results.NotFound(new { error = "Post not found." }) : Results.Ok(ToDto(post));
 }).RequireAuthorization();
 
+app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, int? offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+{
+    var take = Math.Clamp(limit ?? 20, 1, 100);
+    var skip = Math.Max(offset ?? 0, 0);
+    var result = await posts.Find(p => p.ParentPostId == postId)
+        .SortBy(p => p.PostedAt)
+        .Skip(skip)
+        .Limit(take)
+        .ToListAsync(ct);
+    return Results.Ok(result.Select(ToDto));
+}).RequireAuthorization();
+
 app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
     var result = await posts.Find(p => p.AuthorId == userId)

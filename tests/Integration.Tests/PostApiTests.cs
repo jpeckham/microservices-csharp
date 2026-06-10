@@ -571,6 +571,56 @@ public sealed class PostApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task GetReplies_returns_replies_in_chronological_order()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Original post" });
+        var createResp = await fx.Post.SendAsync(createReq);
+        var parent = await createResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var r1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = "First reply" });
+        using var r2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent.PostId}/replies", session.Token, new { content = "Second reply" });
+        await fx.Post.SendAsync(r1);
+        await fx.Post.SendAsync(r2);
+
+        using var listReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{parent.PostId}/replies", session.Token);
+        var listResp = await fx.Post.SendAsync(listReq);
+
+        Assert.Equal(HttpStatusCode.OK, listResp.StatusCode);
+        var replies = await listResp.Content.ReadFromJsonAsync<List<PostDto>>();
+        Assert.Equal(2, replies!.Count);
+        Assert.All(replies, r => Assert.Equal(parent.PostId, r.ParentPostId));
+        Assert.Equal("First reply", replies[0].Content);
+        Assert.Equal("Second reply", replies[1].Content);
+    }
+
+    [Fact]
+    public async Task GetReplies_returns_empty_list_when_no_replies()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "No replies yet" });
+        var createResp = await fx.Post.SendAsync(createReq);
+        var parent = await createResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var listReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{parent!.PostId}/replies", session.Token);
+        var listResp = await fx.Post.SendAsync(listReq);
+
+        Assert.Equal(HttpStatusCode.OK, listResp.StatusCode);
+        var replies = await listResp.Content.ReadFromJsonAsync<List<PostDto>>();
+        Assert.Empty(replies!);
+    }
+
+    [Fact]
+    public async Task GetReplies_without_auth_returns_401()
+    {
+        var response = await fx.Post.GetAsync($"/api/posts/{Guid.NewGuid()}/replies");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
