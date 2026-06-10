@@ -372,4 +372,44 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Register_with_invalid_email_format_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = "notanemail", password = "Pass123!", handle = id, displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_with_email_missing_domain_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = "user@", password = "Pass123!", handle = id, displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_with_invalid_email_format_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = "notanemail", password = "Pass123!", handle = id, displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_with_email_missing_domain_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = "missing@", password = "Pass123!", handle = id, displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

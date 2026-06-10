@@ -73,6 +73,9 @@ app.MapPost("/api/users/register", async (
         return Results.BadRequest(new { error = "Email, password, and handle are required." });
     }
 
+    if (!IsValidEmail(request.Email))
+        return Results.BadRequest(new { error = "A valid email address is required." });
+
     if (request.Password.Length < 8 || !request.Password.Any(char.IsDigit))
         return Results.BadRequest(new { error = "Password must be at least 8 characters and contain at least one digit." });
 
@@ -262,6 +265,9 @@ app.MapPost("/api/registrations", async (
         return Results.BadRequest(new { error = "Email, password, and handle are required." });
     }
 
+    if (!IsValidEmail(request.Email))
+        return Results.BadRequest(new { error = "A valid email address is required." });
+
     if (request.Password.Length < 8 || !request.Password.Any(char.IsDigit))
         return Results.BadRequest(new { error = "Password must be at least 8 characters and contain at least one digit." });
 
@@ -385,6 +391,12 @@ static bool IsValidHandle(string handle)
 {
     var raw = handle.Trim().TrimStart('@');
     return raw.Length > 0 && raw.All(c => char.IsLetterOrDigit(c) || c == '_');
+}
+
+static bool IsValidEmail(string email)
+{
+    try { _ = new System.Net.Mail.MailAddress(email); return true; }
+    catch { return false; }
 }
 
 static UserProfileDto ToProfile(UserDocument user, Guid? requesterId, int followerCount, int followingCount) =>
