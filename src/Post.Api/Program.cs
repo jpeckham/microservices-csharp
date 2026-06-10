@@ -132,6 +132,13 @@ app.MapDelete("/api/posts/{id:guid}", async (
 
     await posts.UpdateOneAsync(p => p.Id == id,
         Builders<PostDocument>.Update.Set(p => p.IsDeleted, true), cancellationToken: ct);
+
+    if (toDelete.ParentPostId.HasValue)
+        await posts.UpdateOneAsync(
+            p => p.Id == toDelete.ParentPostId.Value && p.ReplyCount > 0,
+            Builders<PostDocument>.Update.Inc(p => p.ReplyCount, -1),
+            cancellationToken: ct);
+
     await events.PublishAsync(new PostDeleted(toDelete.Id, toDelete.AuthorId, DateTimeOffset.UtcNow), ct);
     return Results.NoContent();
 }).RequireAuthorization();

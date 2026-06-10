@@ -673,6 +673,60 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task DeleteReply_decrements_parent_reply_count()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Parent post" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = "A reply" });
+        var reply = await (await fx.Post.SendAsync(replyReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{reply!.PostId}", session.Token);
+        var deleteResp = await fx.Post.SendAsync(deleteReq);
+        Assert.Equal(HttpStatusCode.NoContent, deleteResp.StatusCode);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{parent.PostId}", session.Token);
+        var updated = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(0, updated!.ReplyCount);
+    }
+
+    [Fact]
+    public async Task DeletePost_top_level_does_not_change_reply_count_on_any_parent()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Top-level post to delete" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{post!.PostId}", session.Token);
+        var deleteResp = await fx.Post.SendAsync(deleteReq);
+
+        Assert.Equal(HttpStatusCode.NoContent, deleteResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteReply_reply_count_does_not_go_below_zero()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Parent post for floor test" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        // Create and delete reply once — count should be 0 after
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = "Reply to delete" });
+        var reply = await (await fx.Post.SendAsync(replyReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{reply!.PostId}", session.Token);
+        await fx.Post.SendAsync(deleteReq);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{parent.PostId}", session.Token);
+        var updated = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(0, updated!.ReplyCount);
+    }
+
+    [Fact]
     public async Task ReplyToPost_empty_content_returns_400()
     {
         var session = await fx.RegisterAndLoginAsync();
