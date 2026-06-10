@@ -1142,6 +1142,84 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task RecentPosts_RepostedByMe_is_true_after_reposting()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post to repost in feed" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repost = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repost);
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/recent?limit=50", reposter.Token);
+        var result = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<List<PostDto>>();
+
+        var found = result!.Single(p => p.PostId == original.PostId);
+        Assert.True(found.RepostedByMe);
+    }
+
+    [Fact]
+    public async Task RecentPosts_RepostedByMe_is_false_for_non_reposter()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+        var reader = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post for reader feed check" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repost = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repost);
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/recent?limit=50", reader.Token);
+        var result = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<List<PostDto>>();
+
+        var found = result!.Single(p => p.PostId == original.PostId);
+        Assert.False(found.RepostedByMe);
+    }
+
+    [Fact]
+    public async Task ByUser_RepostedByMe_is_true_after_reposting()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post visible on author profile" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repost = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repost);
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/by-user/{author.UserId}?limit=20&offset=0", reposter.Token);
+        var result = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<List<PostDto>>();
+
+        var found = result!.Single(p => p.PostId == original.PostId);
+        Assert.True(found.RepostedByMe);
+    }
+
+    [Fact]
+    public async Task SearchPosts_RepostedByMe_is_true_after_reposting()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = $"Searchable repost target {unique}" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repost = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repost);
+
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=20&offset=0", reposter.Token);
+        var results = await (await fx.Post.SendAsync(search)).Content.ReadFromJsonAsync<SearchResultsDto>();
+
+        var found = results!.Posts.Single(p => p.PostId == original.PostId);
+        Assert.True(found.RepostedByMe);
+    }
+
+    [Fact]
     public async Task DeletePost_soft_deletes_so_GET_returns_404()
     {
         var session = await fx.RegisterAndLoginAsync();

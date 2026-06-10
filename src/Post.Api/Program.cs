@@ -229,7 +229,8 @@ app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, i
         .ToListAsync(ct);
     var originals = await LoadOriginals(result, posts, ct);
     var likedIds = await LoadLikedIds(result.Select(p => p.Id), principal, postLikes, ct);
-    return Results.Ok(result.Select(p => ToDto(p, likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
+    var repostedIds = await LoadRepostedIds(result.Select(p => p.Id), principal, posts, ct);
+    return Results.Ok(result.Select(p => ToDto(p, repostedByMe: repostedIds.Contains(p.Id), likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
 }).RequireAuthorization();
 
 app.MapPost("/api/posts/{postId:guid}/reposts", async (
@@ -323,8 +324,10 @@ app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, in
     var originals = await LoadOriginals(result, posts, ct);
     var parents = await LoadParents(result, posts, ct);
     var likedIds = await LoadLikedIds(result.Select(p => p.Id), principal, postLikes, ct);
+    var repostedIds = await LoadRepostedIds(result.Select(p => p.Id), principal, posts, ct);
     return Results.Ok(result.Select(p => ToDto(
         p,
+        repostedByMe: repostedIds.Contains(p.Id),
         likedByMe: likedIds.Contains(p.Id),
         quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null,
         replyTarget: p.ParentPostId.HasValue && parents.TryGetValue(p.ParentPostId.Value, out var par) ? ToQuotedDto(par) : null)));
@@ -375,7 +378,8 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, ClaimsP
         .ToListAsync(ct);
     var originals = await LoadOriginals(result, posts, ct);
     var likedIds = await LoadLikedIds(result.Select(p => p.Id), principal, postLikes, ct);
-    var dtos = result.Select(p => ToDto(p, likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)).ToList();
+    var repostedIds = await LoadRepostedIds(result.Select(p => p.Id), principal, posts, ct);
+    var dtos = result.Select(p => ToDto(p, repostedByMe: repostedIds.Contains(p.Id), likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)).ToList();
     return Results.Ok(new SearchResultsDto(dtos, q ?? "", limit, offset));
 }).RequireAuthorization();
 
@@ -388,7 +392,8 @@ app.MapGet("/api/posts/recent", async (int? limit, ClaimsPrincipal principal, IM
         .ToListAsync(ct);
     var originals = await LoadOriginals(result, posts, ct);
     var likedIds = await LoadLikedIds(result.Select(p => p.Id), principal, postLikes, ct);
-    return Results.Ok(result.Select(p => ToDto(p, likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
+    var repostedIds = await LoadRepostedIds(result.Select(p => p.Id), principal, posts, ct);
+    return Results.Ok(result.Select(p => ToDto(p, repostedByMe: repostedIds.Contains(p.Id), likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
 }).RequireAuthorization();
 
 app.MapPost("/events/LikeAdded", async (LikeAdded integrationEvent, IMongoCollection<PostDocument> posts, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct) =>
@@ -456,6 +461,18 @@ static async Task<HashSet<Guid>> LoadLikedIds(IEnumerable<Guid> postIds, ClaimsP
     if (ids.Count == 0) return [];
     return (await postLikes.Find(l => l.UserId == userId.Value && ids.Contains(l.PostId))
         .Project(l => l.PostId)
+        .ToListAsync(ct)).ToHashSet();
+}
+
+static async Task<HashSet<Guid>> LoadRepostedIds(IEnumerable<Guid> postIds, ClaimsPrincipal principal, IMongoCollection<PostDocument> posts, CancellationToken ct)
+{
+    var userId = principal.GetUserId();
+    if (!userId.HasValue) return [];
+    var ids = postIds.ToList();
+    if (ids.Count == 0) return [];
+    var nullableIds = ids.Select(id => (Guid?)id).ToList();
+    return (await posts.Find(p => p.AuthorId == userId.Value && nullableIds.Contains(p.OriginalPostId) && !p.IsDeleted)
+        .Project(p => p.OriginalPostId!.Value)
         .ToListAsync(ct)).ToHashSet();
 }
 
