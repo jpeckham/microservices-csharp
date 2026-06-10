@@ -16,6 +16,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("SocialApi", (sp, client) =>
+{
+    var url = sp.GetRequiredService<IConfiguration>()["Social:ApiUrl"];
+    if (!string.IsNullOrWhiteSpace(url))
+        client.BaseAddress = new Uri(url.TrimEnd('/') + "/");
+});
 builder.Services.AddSingleton<IEventPublisher, ConfiguredEventPublisher>();
 builder.Services.AddSingleton(_ =>
 {
@@ -138,19 +144,25 @@ app.MapGet("/api/users/me", async (ClaimsPrincipal principal, IMongoCollection<U
     return user is null ? Results.NotFound(new { error = "User not found." }) : Results.Ok(ToProfile(user, userId, 0, 0));
 }).RequireAuthorization();
 
-app.MapGet("/api/users/{id:guid}", async (Guid id, IMongoCollection<UserDocument> users, CancellationToken ct) =>
+app.MapGet("/api/users/{id:guid}", async (Guid id, ClaimsPrincipal principal, HttpContext context, IMongoCollection<UserDocument> users, IHttpClientFactory httpClientFactory, CancellationToken ct) =>
 {
     var user = await users.Find(u => u.Id == id).FirstOrDefaultAsync(ct);
-    return user is null ? Results.NotFound(new { error = "User not found." }) : Results.Ok(ToProfile(user, null, 0, 0));
+    if (user is null) return Results.NotFound(new { error = "User not found." });
+    var requesterId = principal.GetUserId();
+    var token = ExtractBearerToken(context);
+    var (followerCount, followingCount, isFollowedByMe) = await FetchSocialAsync(user.Id, requesterId, httpClientFactory, token, ct);
+    return Results.Ok(ToProfile(user, requesterId, followerCount, followingCount, isFollowedByMe));
 }).RequireAuthorization();
 
-app.MapGet("/api/users/by-handle/{handle}", async (string handle, ClaimsPrincipal principal, IMongoCollection<UserDocument> users, CancellationToken ct) =>
+app.MapGet("/api/users/by-handle/{handle}", async (string handle, ClaimsPrincipal principal, HttpContext context, IMongoCollection<UserDocument> users, IHttpClientFactory httpClientFactory, CancellationToken ct) =>
 {
     var normalized = NormalizeHandle(handle);
     var user = await users.Find(u => u.Handle == normalized).FirstOrDefaultAsync(ct);
-    return user is null
-        ? Results.NotFound(new { error = "Profile not found." })
-        : Results.Ok(ToProfile(user, principal.GetUserId(), 0, 0));
+    if (user is null) return Results.NotFound(new { error = "Profile not found." });
+    var requesterId = principal.GetUserId();
+    var token = ExtractBearerToken(context);
+    var (followerCount, followingCount, isFollowedByMe) = await FetchSocialAsync(user.Id, requesterId, httpClientFactory, token, ct);
+    return Results.Ok(ToProfile(user, requesterId, followerCount, followingCount, isFollowedByMe));
 }).RequireAuthorization();
 
 app.MapGet("/api/users/search", async (string? q, int limit, int offset, IMongoCollection<UserDocument> users, CancellationToken ct) =>
@@ -415,8 +427,50 @@ static string NormalizeCode(string code)
     return digits.Length == 6 ? digits : code.Trim();
 }
 
-static UserProfileDto ToProfile(UserDocument user, Guid? requesterId, int followerCount, int followingCount) =>
-    new(user.Id, user.Username, user.Handle, user.DisplayName, user.RegisteredAt, followerCount, followingCount, requesterId == user.Id, false);
+static string? ExtractBearerToken(HttpContext context)
+{
+    var header = context.Request.Headers.Authorization.ToString();
+    return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..] : null;
+}
+
+static async Task<(int FollowerCount, int FollowingCount, bool IsFollowedByMe)> FetchSocialAsync(
+    Guid userId, Guid? requesterId, IHttpClientFactory httpClientFactory, string? bearerToken, CancellationToken ct)
+{
+    try
+    {
+        var client = httpClientFactory.CreateClient("SocialApi");
+        if (client.BaseAddress is null) return (0, 0, false);
+
+        var countsReq = new HttpRequestMessage(HttpMethod.Get, $"api/users/{userId}/counts");
+        if (bearerToken is not null)
+            countsReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearerToken);
+        var countsResp = await client.SendAsync(countsReq, ct);
+        if (!countsResp.IsSuccessStatusCode) return (0, 0, false);
+        var counts = await countsResp.Content.ReadFromJsonAsync<SocialCountsDto>(ct);
+
+        bool isFollowedByMe = false;
+        if (requesterId.HasValue && requesterId.Value != userId && bearerToken is not null)
+        {
+            var isFollowingReq = new HttpRequestMessage(HttpMethod.Get, $"api/users/{requesterId.Value}/is-following/{userId}");
+            isFollowingReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearerToken);
+            var isFollowingResp = await client.SendAsync(isFollowingReq, ct);
+            if (isFollowingResp.IsSuccessStatusCode)
+            {
+                var dto = await isFollowingResp.Content.ReadFromJsonAsync<IsFollowingDto>(ct);
+                isFollowedByMe = dto?.IsFollowing ?? false;
+            }
+        }
+
+        return (counts?.FollowerCount ?? 0, counts?.FollowingCount ?? 0, isFollowedByMe);
+    }
+    catch
+    {
+        return (0, 0, false);
+    }
+}
+
+static UserProfileDto ToProfile(UserDocument user, Guid? requesterId, int followerCount, int followingCount, bool isFollowedByMe = false) =>
+    new(user.Id, user.Username, user.Handle, user.DisplayName, user.RegisteredAt, followerCount, followingCount, requesterId == user.Id, isFollowedByMe);
 
 static string CreateToken(UserDocument user, IConfiguration configuration)
 {
@@ -447,6 +501,9 @@ public sealed class UserDocument
     public string PasswordHash { get; set; } = "";
     public DateTimeOffset RegisteredAt { get; set; }
 }
+
+file sealed record SocialCountsDto(int FollowerCount, int FollowingCount);
+file sealed record IsFollowingDto(bool IsFollowing);
 
 public sealed record RegisterRequest(string Email, string Password, string Handle, string? DisplayName);
 public sealed record LoginRequest(string Email, string Password);

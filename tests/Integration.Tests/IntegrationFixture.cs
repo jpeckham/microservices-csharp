@@ -31,15 +31,17 @@ public sealed class IntegrationFixture : IAsyncLifetime
         var cs = _mongo.GetConnectionString();
 
         _mongoClient = new MongoClient(cs);
-        _identityFactory = new IdentityApiFactory(cs);
         _postFactory = new PostApiFactory(cs);
         _socialFactory = new SocialApiFactory(cs);
         _engagementFactory = new EngagementApiFactory(cs);
         _feedFactory = new FeedApiFactory(cs);
 
+        // Social must be started before Identity so its test handler can be wired in
+        Social = _socialFactory.CreateClient();
+        _identityFactory = new IdentityApiFactory(cs, _socialFactory);
+
         Identity = _identityFactory.CreateClient();
         Post = _postFactory.CreateClient();
-        Social = _socialFactory.CreateClient();
         Engagement = _engagementFactory.CreateClient();
         Feed = _feedFactory.CreateClient();
     }

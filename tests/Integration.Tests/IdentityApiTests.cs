@@ -115,6 +115,60 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Fact]
+    public async Task GetByHandle_is_followed_by_me_false_before_following()
+    {
+        var viewer = await fx.RegisterAndLoginAsync();
+        var target = await fx.RegisterAndLoginAsync();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/{target.Handle}", viewer.Token);
+        var profile = await (await fx.Identity.SendAsync(req)).Content.ReadFromJsonAsync<UserProfileDto>();
+
+        Assert.False(profile!.IsFollowedByMe);
+    }
+
+    [Fact]
+    public async Task GetByHandle_is_followed_by_me_true_after_following()
+    {
+        var viewer = await fx.RegisterAndLoginAsync();
+        var target = await fx.RegisterAndLoginAsync();
+
+        using var follow = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target.UserId}/follows", viewer.Token);
+        await fx.Social.SendAsync(follow);
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/{target.Handle}", viewer.Token);
+        var profile = await (await fx.Identity.SendAsync(req)).Content.ReadFromJsonAsync<UserProfileDto>();
+
+        Assert.True(profile!.IsFollowedByMe);
+    }
+
+    [Fact]
+    public async Task GetByHandle_follower_count_increments_after_follow()
+    {
+        var follower = await fx.RegisterAndLoginAsync();
+        var target = await fx.RegisterAndLoginAsync();
+
+        using var follow = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target.UserId}/follows", follower.Token);
+        await fx.Social.SendAsync(follow);
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/{target.Handle}", follower.Token);
+        var profile = await (await fx.Identity.SendAsync(req)).Content.ReadFromJsonAsync<UserProfileDto>();
+
+        Assert.Equal(1, profile!.FollowerCount);
+    }
+
+    [Fact]
+    public async Task GetByHandle_own_profile_is_followed_by_me_false()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/{session.Handle}", session.Token);
+        var profile = await (await fx.Identity.SendAsync(req)).Content.ReadFromJsonAsync<UserProfileDto>();
+
+        Assert.True(profile!.IsOwnProfile);
+        Assert.False(profile.IsFollowedByMe);
+    }
+
     // --- Password reset ---
 
     [Fact]
