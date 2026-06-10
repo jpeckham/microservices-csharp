@@ -172,6 +172,118 @@ public sealed class FeedApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task CommentAdded_event_increments_comment_count_in_feed()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+        var authorId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = authorId,
+            AuthorHandle = "@commenter",
+            AuthorDisplayName = "Commenter",
+            Content = "Post with comments",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/CommentAdded", new
+        {
+            CommentId = Guid.NewGuid(),
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@replier",
+            AuthorDisplayName = "Replier",
+            Content = "Nice post!",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        Assert.Equal(1, entry.CommentCount);
+    }
+
+    [Fact]
+    public async Task CommentDeleted_event_decrements_comment_count_in_feed()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+        var authorId = Guid.NewGuid();
+        var commentId = Guid.NewGuid();
+        var commentAuthorId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = authorId,
+            AuthorHandle = "@author",
+            AuthorDisplayName = "Author",
+            Content = "Post for comment delete test",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/CommentAdded", new
+        {
+            CommentId = commentId,
+            PostId = postId,
+            AuthorId = commentAuthorId,
+            AuthorHandle = "@replier",
+            AuthorDisplayName = "Replier",
+            Content = "A comment",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/CommentDeleted", new
+        {
+            CommentId = commentId,
+            PostId = postId,
+            AuthorId = commentAuthorId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        Assert.Equal(0, entry.CommentCount);
+    }
+
+    [Fact]
+    public async Task CommentDeleted_event_does_not_decrement_comment_count_below_zero()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+        var authorId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = authorId,
+            AuthorHandle = "@authorzero",
+            AuthorDisplayName = "Author Zero",
+            Content = "Post with no comments",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/CommentDeleted", new
+        {
+            CommentId = Guid.NewGuid(),
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        Assert.Equal(0, entry.CommentCount);
+    }
+
+    [Fact]
     public async Task HealthCheck_returns_healthy()
     {
         var response = await fx.Feed.GetAsync("/health");

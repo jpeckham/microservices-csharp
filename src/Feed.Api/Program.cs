@@ -163,6 +163,15 @@ app.MapPost("/events/CommentAdded", async (CommentAdded integrationEvent, IMongo
     return Results.Accepted();
 });
 
+app.MapPost("/events/CommentDeleted", async (CommentDeleted integrationEvent, IMongoCollection<FeedEntryDocument> entries, CancellationToken ct) =>
+{
+    await entries.UpdateOneAsync(
+        e => e.PostId == integrationEvent.PostId && e.CommentCount > 0,
+        Builders<FeedEntryDocument>.Update.Inc(e => e.CommentCount, -1),
+        cancellationToken: ct);
+    return Results.Accepted();
+});
+
 app.MapHealthChecks("/health");
 app.Run();
 
@@ -307,6 +316,16 @@ public sealed class ServiceBusFeedConsumer(
                 if (commentAdded is not null)
                 {
                     await entries.UpdateOneAsync(e => e.PostId == commentAdded.PostId, Builders<FeedEntryDocument>.Update.Inc(e => e.CommentCount, 1), cancellationToken: args.CancellationToken);
+                }
+                break;
+            case nameof(CommentDeleted):
+                var commentDeleted = JsonSerializer.Deserialize<CommentDeleted>(json);
+                if (commentDeleted is not null)
+                {
+                    await entries.UpdateOneAsync(
+                        e => e.PostId == commentDeleted.PostId && e.CommentCount > 0,
+                        Builders<FeedEntryDocument>.Update.Inc(e => e.CommentCount, -1),
+                        cancellationToken: args.CancellationToken);
                 }
                 break;
         }
