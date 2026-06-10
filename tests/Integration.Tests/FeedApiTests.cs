@@ -292,4 +292,153 @@ public sealed class FeedApiTests(IntegrationFixture fx)
         var body = await response.Content.ReadAsStringAsync();
         Assert.Equal("Healthy", body);
     }
+
+    [Fact]
+    public async Task UserBlocked_event_stores_block_in_feed()
+    {
+        var blockerId = Guid.NewGuid();
+        var blockedId = Guid.NewGuid();
+        var blockId = Guid.NewGuid();
+
+        var response = await fx.Feed.PostAsJsonAsync("/events/UserBlocked", new
+        {
+            BlockId = blockId,
+            BlockerId = blockerId,
+            BlockedId = blockedId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UserUnblocked_event_returns_accepted()
+    {
+        var blockerId = Guid.NewGuid();
+        var blockedId = Guid.NewGuid();
+
+        var response = await fx.Feed.PostAsJsonAsync("/events/UserUnblocked", new
+        {
+            BlockerId = blockerId,
+            BlockedId = blockedId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetFeed_does_not_show_posts_from_blocked_user()
+    {
+        var viewer = await fx.RegisterAndLoginAsync();
+        var blockedAuthorId = Guid.NewGuid();
+        var otherAuthorId = Guid.NewGuid();
+        var blockedPostId = Guid.NewGuid();
+        var visiblePostId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = blockedPostId,
+            AuthorId = blockedAuthorId,
+            AuthorHandle = "@blocked",
+            AuthorDisplayName = "Blocked",
+            Content = "You should not see this",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = visiblePostId,
+            AuthorId = otherAuthorId,
+            AuthorHandle = "@visible",
+            AuthorDisplayName = "Visible",
+            Content = "You should see this",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/UserBlocked", new
+        {
+            BlockId = Guid.NewGuid(),
+            BlockerId = viewer.UserId,
+            BlockedId = blockedAuthorId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", viewer.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        Assert.DoesNotContain(entries!, e => e.PostId == blockedPostId);
+        Assert.Contains(entries!, e => e.PostId == visiblePostId);
+    }
+
+    [Fact]
+    public async Task GetFeed_does_not_show_posts_from_user_who_blocked_me()
+    {
+        var viewer = await fx.RegisterAndLoginAsync();
+        var authorWhoBlockedMe = Guid.NewGuid();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = authorWhoBlockedMe,
+            AuthorHandle = "@blocker",
+            AuthorDisplayName = "Blocker",
+            Content = "Author blocked the viewer",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/UserBlocked", new
+        {
+            BlockId = Guid.NewGuid(),
+            BlockerId = authorWhoBlockedMe,
+            BlockedId = viewer.UserId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", viewer.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        Assert.DoesNotContain(entries!, e => e.PostId == postId);
+    }
+
+    [Fact]
+    public async Task GetFeed_shows_posts_again_after_unblock()
+    {
+        var viewer = await fx.RegisterAndLoginAsync();
+        var authorId = Guid.NewGuid();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = authorId,
+            AuthorHandle = "@reappearing",
+            AuthorDisplayName = "Reappearing",
+            Content = "Should reappear after unblock",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/UserBlocked", new
+        {
+            BlockId = Guid.NewGuid(),
+            BlockerId = viewer.UserId,
+            BlockedId = authorId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/UserUnblocked", new
+        {
+            BlockerId = viewer.UserId,
+            BlockedId = authorId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", viewer.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        Assert.Contains(entries!, e => e.PostId == postId);
+    }
 }

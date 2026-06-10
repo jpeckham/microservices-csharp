@@ -192,6 +192,129 @@ public sealed class SocialApiTests(IntegrationFixture fx)
         var body = await response.Content.ReadAsStringAsync();
         Assert.Equal("Healthy", body);
     }
+
+    [Fact]
+    public async Task Block_user_returns_204()
+    {
+        var blocker = await fx.RegisterAndLoginAsync();
+        var target = await fx.RegisterAndLoginAsync();
+
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target.UserId}/blocks", blocker.Token);
+        var response = await fx.Social.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Block_self_returns_400()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{session.UserId}/blocks", session.Token);
+        var response = await fx.Social.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Block_duplicate_is_idempotent()
+    {
+        var blocker = await fx.RegisterAndLoginAsync();
+        var target = await fx.RegisterAndLoginAsync();
+
+        using var req1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target.UserId}/blocks", blocker.Token);
+        using var req2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target.UserId}/blocks", blocker.Token);
+        await fx.Social.SendAsync(req1);
+        var response = await fx.Social.SendAsync(req2);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Unblock_user_returns_204()
+    {
+        var blocker = await fx.RegisterAndLoginAsync();
+        var target = await fx.RegisterAndLoginAsync();
+
+        using var block = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target.UserId}/blocks", blocker.Token);
+        await fx.Social.SendAsync(block);
+
+        using var unblock = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/users/{target.UserId}/blocks", blocker.Token);
+        var response = await fx.Social.SendAsync(unblock);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Unblock_nonexistent_is_idempotent()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var target = await fx.RegisterAndLoginAsync();
+
+        using var request = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/users/{target.UserId}/blocks", session.Token);
+        var response = await fx.Social.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetBlocks_returns_own_blocked_users()
+    {
+        var blocker = await fx.RegisterAndLoginAsync();
+        var target1 = await fx.RegisterAndLoginAsync();
+        var target2 = await fx.RegisterAndLoginAsync();
+
+        using var block1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target1.UserId}/blocks", blocker.Token);
+        using var block2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target2.UserId}/blocks", blocker.Token);
+        await fx.Social.SendAsync(block1);
+        await fx.Social.SendAsync(block2);
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/{blocker.UserId}/blocks", blocker.Token);
+        var response = await fx.Social.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<List<BlockedUserDto>>();
+        Assert.Contains(result!, b => b.BlockedUserId == target1.UserId);
+        Assert.Contains(result!, b => b.BlockedUserId == target2.UserId);
+    }
+
+    [Fact]
+    public async Task GetBlocks_for_other_user_returns_403()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var other = await fx.RegisterAndLoginAsync();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/{other.UserId}/blocks", session.Token);
+        var response = await fx.Social.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetBlocks_requires_auth()
+    {
+        var response = await fx.Social.GetAsync($"/api/users/{Guid.NewGuid()}/blocks");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Block_removes_from_GetBlocks_after_unblock()
+    {
+        var blocker = await fx.RegisterAndLoginAsync();
+        var target = await fx.RegisterAndLoginAsync();
+
+        using var block = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target.UserId}/blocks", blocker.Token);
+        await fx.Social.SendAsync(block);
+
+        using var unblock = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/users/{target.UserId}/blocks", blocker.Token);
+        await fx.Social.SendAsync(unblock);
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/{blocker.UserId}/blocks", blocker.Token);
+        var response = await fx.Social.SendAsync(req);
+        var result = await response.Content.ReadFromJsonAsync<List<BlockedUserDto>>();
+        Assert.DoesNotContain(result!, b => b.BlockedUserId == target.UserId);
+    }
 }
 
 file sealed record IsFollowingDto(bool IsFollowing);

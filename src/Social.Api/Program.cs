@@ -21,6 +21,7 @@ builder.Services.AddSingleton(_ =>
     return new MongoClient(connectionString).GetDatabase(databaseName);
 });
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<FollowDocument>("follows"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<BlockDocument>("blocks"));
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "local-development-secret-change-me-32";
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -117,6 +118,60 @@ app.MapGet("/api/users/{followerId:guid}/is-following/{targetId:guid}", async (G
     return Results.Ok(new IsFollowingDto(isFollowing));
 }).RequireAuthorization();
 
+app.MapPost("/api/users/{blockedId:guid}/blocks", async (
+    Guid blockedId,
+    ClaimsPrincipal principal,
+    IMongoCollection<BlockDocument> blocks,
+    IEventPublisher events,
+    CancellationToken ct) =>
+{
+    var blockerId = principal.GetUserId();
+    if (blockerId is null) return Results.Unauthorized();
+    if (blockerId == blockedId) return Results.BadRequest(new { error = "Users cannot block themselves." });
+
+    var existing = await blocks.Find(b => b.BlockerId == blockerId && b.BlockedId == blockedId).FirstOrDefaultAsync(ct);
+    if (existing is not null) return Results.NoContent();
+
+    var block = new BlockDocument
+    {
+        Id = Guid.NewGuid(),
+        BlockerId = blockerId.Value,
+        BlockedId = blockedId,
+        CreatedAt = DateTimeOffset.UtcNow
+    };
+    await blocks.InsertOneAsync(block, cancellationToken: ct);
+    await events.PublishAsync(new UserBlocked(block.Id, block.BlockerId, block.BlockedId, DateTimeOffset.UtcNow), ct);
+    return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapDelete("/api/users/{blockedId:guid}/blocks", async (
+    Guid blockedId,
+    ClaimsPrincipal principal,
+    IMongoCollection<BlockDocument> blocks,
+    IEventPublisher events,
+    CancellationToken ct) =>
+{
+    var blockerId = principal.GetUserId();
+    if (blockerId is null) return Results.Unauthorized();
+    var block = await blocks.FindOneAndDeleteAsync(b => b.BlockerId == blockerId && b.BlockedId == blockedId, cancellationToken: ct);
+    if (block is not null)
+        await events.PublishAsync(new UserUnblocked(block.BlockerId, block.BlockedId, DateTimeOffset.UtcNow), ct);
+    return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapGet("/api/users/{userId:guid}/blocks", async (
+    Guid userId,
+    ClaimsPrincipal principal,
+    IMongoCollection<BlockDocument> blocks,
+    CancellationToken ct) =>
+{
+    var callerId = principal.GetUserId();
+    if (callerId is null) return Results.Unauthorized();
+    if (callerId.Value != userId) return Results.Forbid();
+    var result = await blocks.Find(b => b.BlockerId == userId).ToListAsync(ct);
+    return Results.Ok(result.Select(b => new BlockedUserDto(b.BlockedId, b.CreatedAt)));
+}).RequireAuthorization();
+
 app.MapHealthChecks("/health");
 app.Run();
 
@@ -134,6 +189,19 @@ public sealed class FollowDocument
 
 public sealed record FollowCountsDto(int FollowerCount, int FollowingCount);
 public sealed record IsFollowingDto(bool IsFollowing);
+public sealed record BlockedUserDto(Guid BlockedUserId, DateTimeOffset CreatedAt);
+
+public sealed class BlockDocument
+{
+    [BsonId]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid Id { get; set; }
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid BlockerId { get; set; }
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid BlockedId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
 
 public static class ClaimsPrincipalExtensions
 {

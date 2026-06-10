@@ -21,6 +21,7 @@ builder.Services.AddSingleton(_ =>
 });
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<FeedEntryDocument>("feedEntries"));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<FeedFollowDocument>("feedFollows"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<FeedBlockDocument>("feedBlocks"));
 builder.Services.AddHostedService<ServiceBusFeedConsumer>();
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "local-development-secret-change-me-32";
@@ -57,6 +58,7 @@ app.MapGet("/api/feed", async (
     ClaimsPrincipal principal,
     IMongoCollection<FeedEntryDocument> entries,
     IMongoCollection<FeedFollowDocument> follows,
+    IMongoCollection<FeedBlockDocument> blocks,
     CancellationToken ct) =>
 {
     var userId = principal.GetUserId();
@@ -65,6 +67,15 @@ app.MapGet("/api/feed", async (
     {
         var following = await follows.Find(f => f.FollowerId == userId).Project(f => f.FollowingId).ToListAsync(ct);
         filter = Builders<FeedEntryDocument>.Filter.In(e => e.AuthorId, following.Append(userId.Value));
+    }
+
+    if (userId.HasValue)
+    {
+        var blockedByMe = await blocks.Find(b => b.BlockerId == userId.Value).Project(b => b.BlockedId).ToListAsync(ct);
+        var blockedMe = await blocks.Find(b => b.BlockedId == userId.Value).Project(b => b.BlockerId).ToListAsync(ct);
+        var excluded = blockedByMe.Concat(blockedMe).Distinct().ToList();
+        if (excluded.Count > 0)
+            filter &= Builders<FeedEntryDocument>.Filter.Nin(e => e.AuthorId, excluded);
     }
 
     var result = await entries.Find(filter)
@@ -172,6 +183,25 @@ app.MapPost("/events/CommentDeleted", async (CommentDeleted integrationEvent, IM
     return Results.Accepted();
 });
 
+app.MapPost("/events/UserBlocked", async (UserBlocked integrationEvent, IMongoCollection<FeedBlockDocument> blocks, CancellationToken ct) =>
+{
+    var block = new FeedBlockDocument
+    {
+        Id = integrationEvent.BlockId,
+        BlockerId = integrationEvent.BlockerId,
+        BlockedId = integrationEvent.BlockedId,
+        CreatedAt = integrationEvent.OccurredAt
+    };
+    await blocks.ReplaceOneAsync(b => b.BlockerId == block.BlockerId && b.BlockedId == block.BlockedId, block, new ReplaceOptions { IsUpsert = true }, ct);
+    return Results.Accepted();
+});
+
+app.MapPost("/events/UserUnblocked", async (UserUnblocked integrationEvent, IMongoCollection<FeedBlockDocument> blocks, CancellationToken ct) =>
+{
+    await blocks.DeleteOneAsync(b => b.BlockerId == integrationEvent.BlockerId && b.BlockedId == integrationEvent.BlockedId, ct);
+    return Results.Accepted();
+});
+
 app.MapHealthChecks("/health");
 app.Run();
 
@@ -208,6 +238,18 @@ public sealed class FeedFollowDocument
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class FeedBlockDocument
+{
+    [BsonId]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid Id { get; set; }
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid BlockerId { get; set; }
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid BlockedId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, int LikeCount, int CommentCount);
 
 public static class ClaimsPrincipalExtensions
@@ -225,6 +267,7 @@ public sealed class ServiceBusFeedConsumer(
     IConfiguration configuration,
     IMongoCollection<FeedEntryDocument> entries,
     IMongoCollection<FeedFollowDocument> follows,
+    IMongoCollection<FeedBlockDocument> blocks,
     ILogger<ServiceBusFeedConsumer> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -327,6 +370,25 @@ public sealed class ServiceBusFeedConsumer(
                         Builders<FeedEntryDocument>.Update.Inc(e => e.CommentCount, -1),
                         cancellationToken: args.CancellationToken);
                 }
+                break;
+            case nameof(UserBlocked):
+                var userBlocked = JsonSerializer.Deserialize<UserBlocked>(json);
+                if (userBlocked is not null)
+                {
+                    var block = new FeedBlockDocument
+                    {
+                        Id = userBlocked.BlockId,
+                        BlockerId = userBlocked.BlockerId,
+                        BlockedId = userBlocked.BlockedId,
+                        CreatedAt = userBlocked.OccurredAt
+                    };
+                    await blocks.ReplaceOneAsync(b => b.BlockerId == block.BlockerId && b.BlockedId == block.BlockedId, block, new ReplaceOptions { IsUpsert = true }, args.CancellationToken);
+                }
+                break;
+            case nameof(UserUnblocked):
+                var userUnblocked = JsonSerializer.Deserialize<UserUnblocked>(json);
+                if (userUnblocked is not null)
+                    await blocks.DeleteOneAsync(b => b.BlockerId == userUnblocked.BlockerId && b.BlockedId == userUnblocked.BlockedId, args.CancellationToken);
                 break;
         }
 

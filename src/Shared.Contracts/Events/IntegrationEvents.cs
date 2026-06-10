@@ -119,3 +119,22 @@ public sealed record CommentDeleted(
 {
     public override string EventName => nameof(CommentDeleted);
 }
+
+public sealed record UserBlocked(
+    Guid BlockId,
+    Guid BlockerId,
+    Guid BlockedId,
+    DateTimeOffset OccurredAt)
+    : IntegrationEvent(Guid.NewGuid(), OccurredAt)
+{
+    public override string EventName => nameof(UserBlocked);
+}
+
+public sealed record UserUnblocked(
+    Guid BlockerId,
+    Guid BlockedId,
+    DateTimeOffset OccurredAt)
+    : IntegrationEvent(Guid.NewGuid(), OccurredAt)
+{
+    public override string EventName => nameof(UserUnblocked);
+}

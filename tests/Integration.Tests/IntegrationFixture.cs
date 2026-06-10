@@ -100,4 +100,5 @@ public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, st
 public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string Content, DateTimeOffset PostedAt, int LikeCount, int CommentCount);
 public sealed record CommentDto(Guid CommentId, Guid PostId, Guid AuthorId, string AuthorHandle, string Content, DateTimeOffset CreatedAt);
 public sealed record FollowCountsDto(int FollowerCount, int FollowingCount);
+public sealed record BlockedUserDto(Guid BlockedUserId, DateTimeOffset CreatedAt);
 public sealed record EmailMessageDto(string To, string Subject, string Body, DateTimeOffset SentAt);
