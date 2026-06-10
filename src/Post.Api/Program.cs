@@ -137,6 +137,42 @@ app.MapDelete("/api/posts/{id:guid}", async (
     return Results.NoContent();
 }).RequireAuthorization();
 
+app.MapPost("/api/posts/{postId:guid}/replies", async (
+    Guid postId,
+    CreatePostRequest request,
+    ClaimsPrincipal principal,
+    IMongoCollection<PostDocument> posts,
+    IEventPublisher events,
+    CancellationToken ct) =>
+{
+    var userId = principal.GetUserId();
+    if (userId is null) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 280)
+        return Results.BadRequest(new { error = "Post content must be between 1 and 280 characters." });
+
+    var parent = await posts.Find(p => p.Id == postId).FirstOrDefaultAsync(ct);
+    if (parent is null) return Results.NotFound(new { error = "Parent post not found." });
+
+    var content = request.Content.Trim();
+    var post = new PostDocument
+    {
+        Id = Guid.NewGuid(),
+        AuthorId = userId.Value,
+        AuthorHandle = principal.FindFirstValue(AuthConstants.HandleClaim) ?? $"@{userId.Value.ToString()[..8]}",
+        AuthorDisplayName = principal.FindFirstValue(AuthConstants.DisplayNameClaim) ?? "Unknown user",
+        Content = content,
+        ParentPostId = postId,
+        Hashtags = HashtagExtractor.Extract(content),
+        Mentions = MentionExtractor.Extract(content),
+        PostedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow
+    };
+
+    await posts.InsertOneAsync(post, cancellationToken: ct);
+    await events.PublishAsync(new PostCreated(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, DateTimeOffset.UtcNow), ct);
+    return Results.Created($"/api/posts/{post.Id}", ToDto(post));
+}).RequireAuthorization();
+
 app.MapGet("/api/posts/{id:guid}", async (Guid id, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
     var post = await posts.Find(p => p.Id == id).FirstOrDefaultAsync(ct);
@@ -182,7 +218,7 @@ app.MapHealthChecks("/health");
 app.Run();
 
 static PostDto ToDto(PostDocument post) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions);
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId);
 
 public sealed class PostDocument
 {
@@ -194,6 +230,8 @@ public sealed class PostDocument
     public string AuthorHandle { get; set; } = "";
     public string AuthorDisplayName { get; set; } = "";
     public string Content { get; set; } = "";
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid? ParentPostId { get; set; }
     public List<string> Hashtags { get; set; } = [];
     public List<string> Mentions { get; set; } = [];
     public DateTimeOffset PostedAt { get; set; }
@@ -202,7 +240,7 @@ public sealed class PostDocument
 
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
 public static class HashtagExtractor

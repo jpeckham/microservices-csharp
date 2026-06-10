@@ -519,6 +519,58 @@ public sealed class PostApiTests(IntegrationFixture fx)
         var post = await response.Content.ReadFromJsonAsync<PostDto>();
         Assert.Contains("csharp", post!.Hashtags!);
     }
+
+    [Fact]
+    public async Task ReplyToPost_returns_201_with_parent_id()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Original post" });
+        var createResp = await fx.Post.SendAsync(createReq);
+        var parent = await createResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = "My reply" });
+        var replyResp = await fx.Post.SendAsync(replyReq);
+
+        Assert.Equal(HttpStatusCode.Created, replyResp.StatusCode);
+        var reply = await replyResp.Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal("My reply", reply!.Content);
+        Assert.Equal(parent.PostId, reply.ParentPostId);
+    }
+
+    [Fact]
+    public async Task ReplyToPost_nonexistent_parent_returns_404()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{Guid.NewGuid()}/replies", session.Token, new { content = "Reply to nothing" });
+        var response = await fx.Post.SendAsync(replyReq);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReplyToPost_without_auth_returns_401()
+    {
+        var response = await fx.Post.PostAsJsonAsync($"/api/posts/{Guid.NewGuid()}/replies", new { content = "Reply" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReplyToPost_empty_content_returns_400()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Original" });
+        var createResp = await fx.Post.SendAsync(createReq);
+        var parent = await createResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = "" });
+        var response = await fx.Post.SendAsync(replyReq);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
