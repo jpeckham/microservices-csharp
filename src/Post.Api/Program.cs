@@ -187,24 +187,42 @@ public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Lim
 
 public static class HashtagExtractor
 {
-    private static readonly Regex Pattern = new(@"#([a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled);
+    private static readonly Regex Pattern = new(@"#([a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
-    public static List<string> Extract(string content) =>
-        Pattern.Matches(content)
-            .Select(m => m.Groups[1].Value.ToLowerInvariant())
-            .Distinct()
-            .ToList();
+    public static List<string> Extract(string content)
+    {
+        try
+        {
+            return Pattern.Matches(content)
+                .Select(m => m.Groups[1].Value.ToLowerInvariant())
+                .Distinct()
+                .ToList();
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return [];
+        }
+    }
 }
 
 public static class MentionExtractor
 {
-    private static readonly Regex Pattern = new(@"@([a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled);
+    private static readonly Regex Pattern = new(@"@([a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
-    public static List<string> Extract(string content) =>
-        Pattern.Matches(content)
-            .Select(m => m.Groups[1].Value.ToLowerInvariant())
-            .Distinct()
-            .ToList();
+    public static List<string> Extract(string content)
+    {
+        try
+        {
+            return Pattern.Matches(content)
+                .Select(m => m.Groups[1].Value.ToLowerInvariant())
+                .Distinct()
+                .ToList();
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return [];
+        }
+    }
 }
 
 public static class ClaimsPrincipalExtensions

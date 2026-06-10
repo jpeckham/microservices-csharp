@@ -304,6 +304,35 @@ public sealed class PostApiTests(IntegrationFixture fx)
         var body = await response.Content.ReadAsStringAsync();
         Assert.Equal("Healthy", body);
     }
+
+    [Fact]
+    public async Task CreatePost_with_very_long_content_does_not_throw_and_extracts_tags()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var repeated = string.Concat(Enumerable.Repeat("#dotnet @alice ", 200));
+        var content = repeated.TrimEnd()[..280];
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post);
+    }
+
+    [Fact]
+    public async Task CreatePost_content_at_exactly_280_chars_with_tags_extracts_correctly()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var content = "#csharp " + new string('x', 272);
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content });
+
+        var response = await fx.Post.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.Contains("csharp", post!.Hashtags!);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
