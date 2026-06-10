@@ -125,7 +125,7 @@ app.MapGet("/api/posts/{postId:guid}/comments", async (Guid postId, IMongoCollec
 {
     var result = await comments.Find(c => c.PostId == postId).SortBy(c => c.CreatedAt).ToListAsync(ct);
     return Results.Ok(result.Select(ToDto));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/posts/{postId:guid}/summary", async (
     Guid postId,
@@ -139,7 +139,7 @@ app.MapGet("/api/posts/{postId:guid}/summary", async (
     var commentCount = await comments.CountDocumentsAsync(c => c.PostId == postId, cancellationToken: ct);
     var likedByMe = userId.HasValue && await likes.Find(l => l.PostId == postId && l.UserId == userId).AnyAsync(ct);
     return Results.Ok(new EngagementSummaryDto((int)likeCount, (int)commentCount, likedByMe));
-});
+}).RequireAuthorization();
 
 app.MapHealthChecks("/health");
 app.Run();

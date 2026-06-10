@@ -94,7 +94,8 @@ public sealed class EngagementApiTests(IntegrationFixture fx)
         await fx.Engagement.SendAsync(c1);
         await fx.Engagement.SendAsync(c2);
 
-        var response = await fx.Engagement.GetAsync($"/api/posts/{postId}/comments");
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{postId}/comments", session.Token);
+        var response = await fx.Engagement.SendAsync(req);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var comments = await response.Content.ReadFromJsonAsync<List<CommentDto>>();
@@ -112,12 +113,46 @@ public sealed class EngagementApiTests(IntegrationFixture fx)
         await fx.Engagement.SendAsync(like);
         await fx.Engagement.SendAsync(comment);
 
-        var response = await fx.Engagement.GetAsync($"/api/posts/{postId}/summary");
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{postId}/summary", session.Token);
+        var response = await fx.Engagement.SendAsync(req);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var summary = await response.Content.ReadFromJsonAsync<EngagementSummaryDto>();
         Assert.Equal(1, summary!.LikeCount);
         Assert.Equal(1, summary.CommentCount);
+    }
+
+    [Fact]
+    public async Task GetComments_without_auth_returns_401()
+    {
+        var response = await fx.Engagement.GetAsync($"/api/posts/{Guid.NewGuid()}/comments");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetSummary_without_auth_returns_401()
+    {
+        var response = await fx.Engagement.GetAsync($"/api/posts/{Guid.NewGuid()}/summary");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetEngagementSummary_likedByMe_is_true_for_liker()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        using var like = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{postId}/likes", session.Token);
+        await fx.Engagement.SendAsync(like);
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{postId}/summary", session.Token);
+        var response = await fx.Engagement.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var summary = await response.Content.ReadFromJsonAsync<EngagementSummaryDto>();
+        Assert.True(summary!.LikedByMe);
     }
 
     [Fact]
