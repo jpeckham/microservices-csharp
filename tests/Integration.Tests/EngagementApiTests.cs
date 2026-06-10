@@ -58,6 +58,17 @@ public sealed class EngagementApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task UnlikePost_not_liked_returns_400()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var unlike = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{Guid.NewGuid()}/likes", session.Token);
+        var response = await fx.Engagement.SendAsync(unlike);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task AddComment_returns_201_with_comment()
     {
         var session = await fx.RegisterAndLoginAsync();

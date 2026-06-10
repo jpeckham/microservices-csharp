@@ -83,11 +83,12 @@ app.MapDelete("/api/posts/{postId:guid}/likes", async (
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
 
-    var like = await likes.FindOneAndDeleteAsync(l => l.PostId == postId && l.UserId == userId, cancellationToken: ct);
-    if (like is not null)
-    {
-        await events.PublishAsync(new LikeRemoved(like.Id, postId, userId.Value, DateTimeOffset.UtcNow), ct);
-    }
+    var existing = await likes.Find(l => l.PostId == postId && l.UserId == userId).FirstOrDefaultAsync(ct);
+    if (existing is null)
+        return Results.BadRequest(new { error = "You have not liked this post." });
+
+    await likes.DeleteOneAsync(l => l.Id == existing.Id, ct);
+    await events.PublishAsync(new LikeRemoved(existing.Id, postId, userId.Value, DateTimeOffset.UtcNow), ct);
 
     var count = await likes.CountDocumentsAsync(l => l.PostId == postId, cancellationToken: ct);
     return Results.Ok(new { likeCount = (int)count });
