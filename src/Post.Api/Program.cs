@@ -291,10 +291,36 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
         return Results.BadRequest(new { error = "Query parameter 'q' is required." });
 
     var escaped = System.Text.RegularExpressions.Regex.Escape(q);
-    var contentFilter = Builders<PostDocument>.Filter.Regex(p => p.Content, new MongoDB.Bson.BsonRegularExpression(escaped, "i"));
-    var rootOnlyFilter = Builders<PostDocument>.Filter.Eq(p => p.ParentPostId, null);
-    var filter = Builders<PostDocument>.Filter.And(rootOnlyFilter, contentFilter);
-    var result = await posts.Find(filter)
+    var regex = new MongoDB.Bson.BsonRegularExpression(escaped, "i");
+    var contentFilter = Builders<PostDocument>.Filter.Regex(p => p.Content, regex);
+    var rootOnlyFilter = Builders<PostDocument>.Filter.Eq(p => p.ParentPostId, (Guid?)null);
+
+    // Phase 1: IDs of original posts (not reposts) whose content matches
+    var matchingOriginalIds = await posts
+        .Find(Builders<PostDocument>.Filter.And(
+            rootOnlyFilter,
+            Builders<PostDocument>.Filter.Eq(p => p.OriginalPostId, (Guid?)null),
+            contentFilter))
+        .Project(p => p.Id)
+        .ToListAsync(ct);
+
+    // Phase 2: root posts where content matches OR they repost a matching original
+    FilterDefinition<PostDocument> combinedFilter;
+    if (matchingOriginalIds.Count > 0)
+    {
+        var repostOfMatchFilter = Builders<PostDocument>.Filter.In(
+            p => p.OriginalPostId,
+            matchingOriginalIds.Select(id => (Guid?)id));
+        combinedFilter = Builders<PostDocument>.Filter.And(
+            rootOnlyFilter,
+            Builders<PostDocument>.Filter.Or(contentFilter, repostOfMatchFilter));
+    }
+    else
+    {
+        combinedFilter = Builders<PostDocument>.Filter.And(rootOnlyFilter, contentFilter);
+    }
+
+    var result = await posts.Find(combinedFilter)
         .SortByDescending(p => p.PostedAt)
         .Skip(offset)
         .Limit(limit is <= 0 or > 100 ? 20 : limit)

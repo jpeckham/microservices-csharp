@@ -180,6 +180,27 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task SearchPosts_includes_repost_when_original_content_matches()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = $"Original post {unique}" });
+        var original = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        // Repost with empty quote — own content does not contain unique token
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        var repost = await (await fx.Post.SendAsync(repostReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=50&offset=0", author.Token);
+        var results = await (await fx.Post.SendAsync(search)).Content.ReadFromJsonAsync<SearchResultsDto>();
+
+        Assert.Contains(results!.Posts, p => p.PostId == original.PostId);
+        Assert.Contains(results.Posts, p => p.PostId == repost!.PostId);
+    }
+
+    [Fact]
     public async Task CreatePost_with_hashtags_returns_extracted_hashtags()
     {
         var session = await fx.RegisterAndLoginAsync();
