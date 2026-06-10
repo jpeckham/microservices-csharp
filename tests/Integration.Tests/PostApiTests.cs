@@ -158,7 +158,8 @@ public sealed class PostApiTests(IntegrationFixture fx)
         using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"SearchToken {unique}" });
         await fx.Post.SendAsync(create);
 
-        var response = await fx.Post.GetAsync($"/api/posts/search?q={unique}&limit=10&offset=0");
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=10&offset=0", session.Token);
+        var response = await fx.Post.SendAsync(search);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var results = await response.Content.ReadFromJsonAsync<SearchResultsDto>();
@@ -404,9 +405,19 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task SearchPosts_without_auth_returns_401()
+    {
+        var response = await fx.Post.GetAsync("/api/posts/search?q=hello&limit=10&offset=0");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task SearchPosts_with_empty_query_returns_400()
     {
-        var response = await fx.Post.GetAsync("/api/posts/search?q=&limit=10&offset=0");
+        var session = await fx.RegisterAndLoginAsync();
+        using var request = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/search?q=&limit=10&offset=0", session.Token);
+        var response = await fx.Post.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -418,7 +429,8 @@ public sealed class PostApiTests(IntegrationFixture fx)
         using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "price is $5.00 today" });
         await fx.Post.SendAsync(create);
 
-        var response = await fx.Post.GetAsync("/api/posts/search?q=%245.00&limit=10&offset=0");
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/search?q=%245.00&limit=10&offset=0", session.Token);
+        var response = await fx.Post.SendAsync(search);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
@@ -433,7 +445,8 @@ public sealed class PostApiTests(IntegrationFixture fx)
         await fx.Post.SendAsync(exact);
         await fx.Post.SendAsync(noMatch);
 
-        var response = await fx.Post.GetAsync($"/api/posts/search?q=hello.world+{unique}&limit=10&offset=0");
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q=hello.world+{unique}&limit=10&offset=0", session.Token);
+        var response = await fx.Post.SendAsync(search);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var results = await response.Content.ReadFromJsonAsync<SearchResultsDto>();

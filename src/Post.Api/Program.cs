@@ -166,7 +166,7 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
     return Results.Ok(new SearchResultsDto(result.Select(ToDto).ToList(), q ?? "", limit, offset));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
