@@ -135,13 +135,16 @@ app.MapPost("/api/users/login", async (
     return Results.Ok(new TokenResponse(CreateToken(user, configuration), user.Id, user.Username, user.Handle, user.DisplayName));
 });
 
-app.MapGet("/api/users/me", async (ClaimsPrincipal principal, IMongoCollection<UserDocument> users, CancellationToken ct) =>
+app.MapGet("/api/users/me", async (ClaimsPrincipal principal, HttpContext context, IMongoCollection<UserDocument> users, IHttpClientFactory httpClientFactory, CancellationToken ct) =>
 {
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
 
     var user = await users.Find(u => u.Id == userId).FirstOrDefaultAsync(ct);
-    return user is null ? Results.NotFound(new { error = "User not found." }) : Results.Ok(ToProfile(user, userId, 0, 0));
+    if (user is null) return Results.NotFound(new { error = "User not found." });
+    var token = ExtractBearerToken(context);
+    var (followerCount, followingCount, _) = await FetchSocialAsync(user.Id, userId, httpClientFactory, token, ct);
+    return Results.Ok(ToProfile(user, userId, followerCount, followingCount));
 }).RequireAuthorization();
 
 app.MapGet("/api/users/{id:guid}", async (Guid id, ClaimsPrincipal principal, HttpContext context, IMongoCollection<UserDocument> users, IHttpClientFactory httpClientFactory, CancellationToken ct) =>

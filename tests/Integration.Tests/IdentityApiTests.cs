@@ -77,6 +77,44 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task GetMe_follower_count_reflects_actual_followers()
+    {
+        var me = await fx.RegisterAndLoginAsync();
+        var follower1 = await fx.RegisterAndLoginAsync();
+        var follower2 = await fx.RegisterAndLoginAsync();
+
+        using var f1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{me.UserId}/follows", follower1.Token);
+        using var f2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{me.UserId}/follows", follower2.Token);
+        await fx.Social.SendAsync(f1);
+        await fx.Social.SendAsync(f2);
+
+        using var meReq = fx.AuthorizedRequest(HttpMethod.Get, "/api/users/me", me.Token);
+        var profile = await (await fx.Identity.SendAsync(meReq)).Content.ReadFromJsonAsync<UserProfileDto>();
+
+        Assert.Equal(2, profile!.FollowerCount);
+        Assert.True(profile.IsOwnProfile);
+        Assert.False(profile.IsFollowedByMe);
+    }
+
+    [Fact]
+    public async Task GetMe_following_count_reflects_users_i_follow()
+    {
+        var me = await fx.RegisterAndLoginAsync();
+        var target1 = await fx.RegisterAndLoginAsync();
+        var target2 = await fx.RegisterAndLoginAsync();
+
+        using var f1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target1.UserId}/follows", me.Token);
+        using var f2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target2.UserId}/follows", me.Token);
+        await fx.Social.SendAsync(f1);
+        await fx.Social.SendAsync(f2);
+
+        using var meReq = fx.AuthorizedRequest(HttpMethod.Get, "/api/users/me", me.Token);
+        var profile = await (await fx.Identity.SendAsync(meReq)).Content.ReadFromJsonAsync<UserProfileDto>();
+
+        Assert.Equal(2, profile!.FollowingCount);
+    }
+
+    [Fact]
     public async Task GetMe_without_token_returns_401()
     {
         var response = await fx.Identity.GetAsync("/api/users/me");
