@@ -151,7 +151,7 @@ app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, in
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
     return Results.Ok(result.Select(ToDto));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {

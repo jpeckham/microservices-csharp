@@ -332,6 +332,30 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task GetPostsByUser_without_auth_returns_401()
+    {
+        var response = await fx.Post.GetAsync($"/api/posts/by-user/{Guid.NewGuid()}?limit=10&offset=0");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetPostsByUser_with_auth_returns_posts()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "My authored post" });
+        await fx.Post.SendAsync(create);
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/by-user/{session.UserId}?limit=10&offset=0", session.Token);
+        var response = await fx.Post.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var posts = await response.Content.ReadFromJsonAsync<List<PostDto>>();
+        Assert.NotNull(posts);
+        Assert.Contains(posts, p => p.Content == "My authored post");
+    }
+
+    [Fact]
     public async Task GetRecentPosts_without_auth_returns_401()
     {
         var response = await fx.Post.GetAsync("/api/posts/recent");
