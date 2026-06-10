@@ -4,18 +4,25 @@ namespace Integration.Tests;
 public sealed class FeedApiTests(IntegrationFixture fx)
 {
     [Fact]
-    public async Task GetFeed_without_auth_returns_200()
+    public async Task GetFeed_without_auth_returns_401()
     {
         var response = await fx.Feed.GetAsync("/api/feed?limit=10&offset=0&followingOnly=false");
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var entries = await response.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
-        Assert.NotNull(entries);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetFeedByUser_without_auth_returns_401()
+    {
+        var response = await fx.Feed.GetAsync($"/api/feed/users/{Guid.NewGuid()}?limit=10&offset=0");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
     public async Task PostCreated_event_adds_entry_to_feed()
     {
+        var session = await fx.RegisterAndLoginAsync();
         var postId = Guid.NewGuid();
         var authorId = Guid.NewGuid();
         var evt = new
@@ -31,7 +38,8 @@ public sealed class FeedApiTests(IntegrationFixture fx)
         var evtResponse = await fx.Feed.PostAsJsonAsync("/events/PostCreated", evt);
         Assert.Equal(HttpStatusCode.Accepted, evtResponse.StatusCode);
 
-        var feedResponse = await fx.Feed.GetAsync("/api/feed?limit=50&offset=0&followingOnly=false");
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=50&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
         var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
         Assert.Contains(entries!, e => e.PostId == postId);
     }
@@ -39,6 +47,7 @@ public sealed class FeedApiTests(IntegrationFixture fx)
     [Fact]
     public async Task PostUpdated_event_changes_content_in_feed()
     {
+        var session = await fx.RegisterAndLoginAsync();
         var postId = Guid.NewGuid();
         var authorId = Guid.NewGuid();
 
@@ -60,7 +69,8 @@ public sealed class FeedApiTests(IntegrationFixture fx)
             OccurredAt = DateTimeOffset.UtcNow
         });
 
-        var feedResponse = await fx.Feed.GetAsync("/api/feed?limit=100&offset=0&followingOnly=false");
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
         var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
         var entry = Assert.Single(entries!, e => e.PostId == postId);
         Assert.Equal("After update", entry.Content);
@@ -69,6 +79,7 @@ public sealed class FeedApiTests(IntegrationFixture fx)
     [Fact]
     public async Task PostDeleted_event_removes_entry_from_feed()
     {
+        var session = await fx.RegisterAndLoginAsync();
         var postId = Guid.NewGuid();
         var authorId = Guid.NewGuid();
 
@@ -89,7 +100,8 @@ public sealed class FeedApiTests(IntegrationFixture fx)
             OccurredAt = DateTimeOffset.UtcNow
         });
 
-        var feedResponse = await fx.Feed.GetAsync("/api/feed?limit=100&offset=0&followingOnly=false");
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
         var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
         Assert.DoesNotContain(entries!, e => e.PostId == postId);
     }
@@ -97,6 +109,7 @@ public sealed class FeedApiTests(IntegrationFixture fx)
     [Fact]
     public async Task LikeAdded_event_increments_like_count_in_feed()
     {
+        var session = await fx.RegisterAndLoginAsync();
         var postId = Guid.NewGuid();
         var authorId = Guid.NewGuid();
 
@@ -118,7 +131,8 @@ public sealed class FeedApiTests(IntegrationFixture fx)
             OccurredAt = DateTimeOffset.UtcNow
         });
 
-        var feedResponse = await fx.Feed.GetAsync("/api/feed?limit=100&offset=0&followingOnly=false");
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
         var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
         var entry = Assert.Single(entries!, e => e.PostId == postId);
         Assert.Equal(1, entry.LikeCount);
@@ -127,6 +141,7 @@ public sealed class FeedApiTests(IntegrationFixture fx)
     [Fact]
     public async Task GetFeedByUser_returns_only_that_users_posts()
     {
+        var session = await fx.RegisterAndLoginAsync();
         var userId = Guid.NewGuid();
         var otherUserId = Guid.NewGuid();
 
@@ -150,7 +165,8 @@ public sealed class FeedApiTests(IntegrationFixture fx)
             OccurredAt = DateTimeOffset.UtcNow
         });
 
-        var response = await fx.Feed.GetAsync($"/api/feed/users/{userId}?limit=50&offset=0");
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/feed/users/{userId}?limit=50&offset=0", session.Token);
+        var response = await fx.Feed.SendAsync(req);
         var entries = await response.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
         Assert.All(entries!, e => Assert.Equal(userId, e.AuthorId));
     }

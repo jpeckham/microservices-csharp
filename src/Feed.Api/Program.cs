@@ -73,7 +73,7 @@ app.MapGet("/api/feed", async (
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
     return Results.Ok(result.Select(ToDto));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/feed/users/{userId:guid}", async (Guid userId, int limit, int offset, IMongoCollection<FeedEntryDocument> entries, CancellationToken ct) =>
 {
@@ -83,7 +83,7 @@ app.MapGet("/api/feed/users/{userId:guid}", async (Guid userId, int limit, int o
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
     return Results.Ok(result.Select(ToDto));
-});
+}).RequireAuthorization();
 
 app.MapPost("/events/PostCreated", async (PostCreated integrationEvent, IMongoCollection<FeedEntryDocument> entries, CancellationToken ct) =>
 {
