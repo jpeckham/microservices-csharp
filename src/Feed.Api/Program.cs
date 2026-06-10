@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Azure.Messaging.ServiceBus;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -232,7 +233,7 @@ app.MapHealthChecks("/health");
 app.Run();
 
 static FeedEntryDto ToDto(FeedEntryDocument entry, bool likedByMe = false) =>
-    new(entry.PostId, entry.AuthorId, entry.AuthorHandle, entry.AuthorDisplayName, entry.Content, entry.PostedAt, entry.LikeCount, entry.CommentCount, likedByMe);
+    new(entry.PostId, entry.AuthorId, entry.AuthorHandle, entry.AuthorDisplayName, entry.Content, entry.PostedAt, entry.LikeCount, entry.CommentCount, likedByMe, FeedContentSegmentParser.Parse(entry.Content));
 
 public sealed class FeedEntryDocument
 {
@@ -286,7 +287,39 @@ public sealed class FeedLikeDocument
     public Guid PostId { get; set; }
 }
 
-public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, int LikeCount, int CommentCount, bool LikedByMe = false);
+public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, int LikeCount, int CommentCount, bool LikedByMe = false, List<FeedContentSegmentDto>? ContentSegments = null);
+
+public sealed record FeedContentSegmentDto(int Sequence, string Text, string? MentionHandle = null, string? HashtagText = null);
+
+public static class FeedContentSegmentParser
+{
+    private static readonly Regex TokenPattern = new(@"(@[a-zA-Z][a-zA-Z0-9_]*|#[a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+
+    public static List<FeedContentSegmentDto> Parse(string content)
+    {
+        var segments = new List<FeedContentSegmentDto>();
+        MatchCollection matches;
+        try { matches = TokenPattern.Matches(content); }
+        catch (RegexMatchTimeoutException) { return [new FeedContentSegmentDto(0, content)]; }
+
+        int pos = 0, seq = 0;
+        foreach (Match m in matches)
+        {
+            if (m.Index > pos)
+                segments.Add(new FeedContentSegmentDto(seq++, content[pos..m.Index]));
+            if (m.Value[0] == '@')
+                segments.Add(new FeedContentSegmentDto(seq++, m.Value, MentionHandle: m.Value[1..].ToLowerInvariant()));
+            else
+                segments.Add(new FeedContentSegmentDto(seq++, m.Value, HashtagText: m.Value[1..].ToLowerInvariant()));
+            pos = m.Index + m.Length;
+        }
+        if (pos < content.Length)
+            segments.Add(new FeedContentSegmentDto(seq++, content[pos..]));
+        if (segments.Count == 0)
+            segments.Add(new FeedContentSegmentDto(0, content));
+        return segments;
+    }
+}
 
 public static class ClaimsPrincipalExtensions
 {

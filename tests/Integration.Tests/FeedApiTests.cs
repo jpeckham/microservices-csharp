@@ -628,6 +628,141 @@ public sealed class FeedApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task GetFeed_entry_content_segments_populated_for_plain_text()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@plain",
+            AuthorDisplayName = "Plain Author",
+            Content = "Hello world",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        Assert.NotNull(entry.ContentSegments);
+        var seg = Assert.Single(entry.ContentSegments!);
+        Assert.Equal("Hello world", seg.Text);
+        Assert.Null(seg.MentionHandle);
+        Assert.Null(seg.HashtagText);
+    }
+
+    [Fact]
+    public async Task GetFeed_entry_content_segments_identify_mention()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@segmenter",
+            AuthorDisplayName = "Segmenter",
+            Content = "Hey @alice check this out",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        var segments = entry.ContentSegments!;
+        var mention = Assert.Single(segments, s => s.MentionHandle != null);
+        Assert.Equal("alice", mention.MentionHandle);
+        Assert.Equal("@alice", mention.Text);
+    }
+
+    [Fact]
+    public async Task GetFeed_entry_content_segments_identify_hashtag()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@hashposter",
+            AuthorDisplayName = "Hash Poster",
+            Content = "Loving #dotnet today",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        var segments = entry.ContentSegments!;
+        var hashtag = Assert.Single(segments, s => s.HashtagText != null);
+        Assert.Equal("dotnet", hashtag.HashtagText);
+        Assert.Equal("#dotnet", hashtag.Text);
+    }
+
+    [Fact]
+    public async Task GetFeed_entry_content_segments_cover_full_content_in_order()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+        const string content = "Hi @bob check out #csharp rocks";
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@ordertester",
+            AuthorDisplayName = "Order Tester",
+            Content = content,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        var segments = entry.ContentSegments!;
+        Assert.Equal(content, string.Concat(segments.Select(s => s.Text)));
+        Assert.Equal(segments.Select((_, i) => i), segments.Select(s => s.Sequence));
+    }
+
+    [Fact]
+    public async Task GetFeedByUser_entry_content_segments_populated()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var authorId = Guid.NewGuid();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = authorId,
+            AuthorHandle = "@profileseg",
+            AuthorDisplayName = "Profile Seg",
+            Content = "Post with #tag for profile feed",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/feed/users/{authorId}?limit=50&offset=0", session.Token);
+        var response = await fx.Feed.SendAsync(req);
+        var entries = await response.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        Assert.NotNull(entry.ContentSegments);
+        Assert.Contains(entry.ContentSegments!, s => s.HashtagText == "tag");
+    }
+
+    [Fact]
     public async Task GetFeed_LikedByMe_only_reflects_current_user_not_other_users()
     {
         var alice = await fx.RegisterAndLoginAsync();
