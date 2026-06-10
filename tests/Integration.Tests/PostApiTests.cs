@@ -918,6 +918,93 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task GetPost_returns_reposted_by_me_false_when_not_reposted()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reader = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post to check" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post!.PostId}", reader.Token);
+        var fetched = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.False(fetched!.RepostedByMe);
+    }
+
+    [Fact]
+    public async Task GetPost_returns_reposted_by_me_true_after_reposting()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Repostable" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repost = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repost);
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{original.PostId}", reposter.Token);
+        var fetched = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.True(fetched!.RepostedByMe);
+    }
+
+    [Fact]
+    public async Task GetPost_returns_reposted_by_me_false_after_deleting_repost()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Repostable" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repost = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repost);
+
+        using var del = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{original.PostId}/reposts/mine", reposter.Token);
+        await fx.Post.SendAsync(del);
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{original.PostId}", reposter.Token);
+        var fetched = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.False(fetched!.RepostedByMe);
+    }
+
+    [Fact]
+    public async Task GetPost_reposted_by_me_is_false_for_original_author()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "My post" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post!.PostId}", author.Token);
+        var fetched = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.False(fetched!.RepostedByMe);
+    }
+
+    [Fact]
+    public async Task GetPost_reposted_by_me_is_false_for_another_users_repost()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter1 = await fx.RegisterAndLoginAsync();
+        var reposter2 = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Shared post" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repost = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter1.Token, new { content = "" });
+        await fx.Post.SendAsync(repost);
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{original.PostId}", reposter2.Token);
+        var fetched = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.False(fetched!.RepostedByMe);
+    }
+
+    [Fact]
     public async Task DeletePost_soft_deletes_so_GET_returns_404()
     {
         var session = await fx.RegisterAndLoginAsync();

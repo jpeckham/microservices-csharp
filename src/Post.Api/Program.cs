@@ -176,10 +176,13 @@ app.MapPost("/api/posts/{postId:guid}/replies", async (
     return Results.Created($"/api/posts/{post.Id}", ToDto(post));
 }).RequireAuthorization();
 
-app.MapGet("/api/posts/{id:guid}", async (Guid id, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+app.MapGet("/api/posts/{id:guid}", async (Guid id, ClaimsPrincipal principal, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
     var post = await posts.Find(p => p.Id == id && !p.IsDeleted).FirstOrDefaultAsync(ct);
-    return post is null ? Results.NotFound(new { error = "Post not found." }) : Results.Ok(ToDto(post));
+    if (post is null) return Results.NotFound(new { error = "Post not found." });
+    var userId = principal.GetUserId();
+    var repostedByMe = userId.HasValue && await posts.Find(p => p.OriginalPostId == id && p.AuthorId == userId && !p.IsDeleted).AnyAsync(ct);
+    return Results.Ok(ToDto(post, repostedByMe));
 }).RequireAuthorization();
 
 app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, int? offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
@@ -191,7 +194,7 @@ app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, i
         .Skip(skip)
         .Limit(take)
         .ToListAsync(ct);
-    return Results.Ok(result.Select(ToDto));
+    return Results.Ok(result.Select(p => ToDto(p)));
 }).RequireAuthorization();
 
 app.MapPost("/api/posts/{postId:guid}/reposts", async (
@@ -282,7 +285,7 @@ app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, in
         .Skip(offset)
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
-    return Results.Ok(result.Select(ToDto));
+    return Results.Ok(result.Select(p => ToDto(p)));
 }).RequireAuthorization();
 
 app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
@@ -328,7 +331,7 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
         .Skip(offset)
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
-    return Results.Ok(new SearchResultsDto(result.Select(ToDto).ToList(), q ?? "", limit, offset));
+    return Results.Ok(new SearchResultsDto(result.Select(p => ToDto(p)).ToList(), q ?? "", limit, offset));
 }).RequireAuthorization();
 
 app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
@@ -338,7 +341,7 @@ app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument
         .SortByDescending(p => p.PostedAt)
         .Limit(take)
         .ToListAsync(ct);
-    return Results.Ok(result.Select(ToDto));
+    return Results.Ok(result.Select(p => ToDto(p)));
 }).RequireAuthorization();
 
 app.MapHealthChecks("/health");
@@ -355,8 +358,8 @@ static string PrefixReplyContent(string parentAuthorHandle, string body)
     return $"{prefix} {body}";
 }
 
-static PostDto ToDto(PostDocument post) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount);
+static PostDto ToDto(PostDocument post, bool repostedByMe = false) =>
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, repostedByMe);
 
 public sealed class PostDocument
 {
@@ -383,7 +386,7 @@ public sealed class PostDocument
 
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
 public static class HashtagExtractor
