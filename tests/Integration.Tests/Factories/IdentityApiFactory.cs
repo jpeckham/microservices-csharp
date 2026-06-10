@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Integration.Tests;
 
-public sealed class IdentityApiFactory(string mongoConnectionString, SocialApiFactory? socialFactory = null)
+public sealed class IdentityApiFactory(string mongoConnectionString, SocialApiFactory? socialFactory = null, PostApiFactory? postFactory = null)
     : WebApplicationFactory<IdentityApi::Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -23,6 +23,16 @@ public sealed class IdentityApiFactory(string mongoConnectionString, SocialApiFa
             {
                 services.AddHttpClient("SocialApi")
                     .ConfigurePrimaryHttpMessageHandler(() => socialFactory.Server.CreateHandler());
+            });
+        }
+
+        if (postFactory is not null)
+        {
+            builder.UseSetting("Post:ApiUrl", "http://post-api/");
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddHttpClient("PostApi")
+                    .ConfigurePrimaryHttpMessageHandler(() => postFactory.Server.CreateHandler());
             });
         }
     }

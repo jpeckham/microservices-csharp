@@ -713,6 +713,105 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
         var results = await response.Content.ReadFromJsonAsync<List<UserSearchResultDto>>();
         Assert.Contains(results!, r => r.Handle == $"@{session.Handle}");
     }
+    [Fact]
+    public async Task GetProfile_by_handle_includes_empty_recent_posts_when_no_posts()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/@{session.Handle}", session.Token);
+        var resp = await fx.Identity.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var profile = await resp.Content.ReadFromJsonAsync<UserProfileDto>();
+        Assert.NotNull(profile);
+        Assert.True(profile.RecentPosts is null || profile.RecentPosts.Count == 0);
+    }
+
+    [Fact]
+    public async Task GetProfile_by_handle_includes_recent_posts()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        var postResp = await fx.Post.SendAsync(
+            fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hello from profile test" }));
+        postResp.EnsureSuccessStatusCode();
+        var createdPost = await postResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/@{session.Handle}", session.Token);
+        var resp = await fx.Identity.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var profile = await resp.Content.ReadFromJsonAsync<UserProfileDto>();
+        Assert.NotNull(profile);
+        Assert.NotNull(profile.RecentPosts);
+        Assert.Contains(profile.RecentPosts, p => p.PostId == createdPost!.PostId);
+    }
+
+    [Fact]
+    public async Task GetProfile_by_id_includes_recent_posts()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        var postResp = await fx.Post.SendAsync(
+            fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Post for id profile test" }));
+        postResp.EnsureSuccessStatusCode();
+        var createdPost = await postResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/{session.UserId}", session.Token);
+        var resp = await fx.Identity.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var profile = await resp.Content.ReadFromJsonAsync<UserProfileDto>();
+        Assert.NotNull(profile);
+        Assert.NotNull(profile.RecentPosts);
+        Assert.Contains(profile.RecentPosts, p => p.PostId == createdPost!.PostId);
+    }
+
+    [Fact]
+    public async Task GetProfile_me_includes_recent_posts()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        var postResp = await fx.Post.SendAsync(
+            fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "My own post for me endpoint" }));
+        postResp.EnsureSuccessStatusCode();
+        var createdPost = await postResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/users/me", session.Token);
+        var resp = await fx.Identity.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var profile = await resp.Content.ReadFromJsonAsync<UserProfileDto>();
+        Assert.NotNull(profile);
+        Assert.NotNull(profile.RecentPosts);
+        Assert.Contains(profile.RecentPosts, p => p.PostId == createdPost!.PostId);
+    }
+
+    [Fact]
+    public async Task GetProfile_recent_posts_include_like_count_and_liked_by_me()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var liker = await fx.RegisterAndLoginAsync();
+
+        var postResp = await fx.Post.SendAsync(
+            fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post to be liked" }));
+        postResp.EnsureSuccessStatusCode();
+        var createdPost = await postResp.Content.ReadFromJsonAsync<PostDto>();
+
+        await fx.Post.PostAsJsonAsync("/events/LikeAdded",
+            new { PostId = createdPost!.PostId, UserId = liker.UserId, OccurredAt = DateTimeOffset.UtcNow });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/@{author.Handle}", liker.Token);
+        var resp = await fx.Identity.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var profile = await resp.Content.ReadFromJsonAsync<UserProfileDto>();
+        Assert.NotNull(profile);
+        var post = profile.RecentPosts?.FirstOrDefault(p => p.PostId == createdPost.PostId);
+        Assert.NotNull(post);
+        Assert.Equal(1, post.LikeCount);
+        Assert.True(post.LikedByMe);
+    }
 }
 
 file sealed record PendingRegistrationDto(Guid PendingRegistrationId);

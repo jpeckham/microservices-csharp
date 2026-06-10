@@ -22,6 +22,12 @@ builder.Services.AddHttpClient("SocialApi", (sp, client) =>
     if (!string.IsNullOrWhiteSpace(url))
         client.BaseAddress = new Uri(url.TrimEnd('/') + "/");
 });
+builder.Services.AddHttpClient("PostApi", (sp, client) =>
+{
+    var url = sp.GetRequiredService<IConfiguration>()["Post:ApiUrl"];
+    if (!string.IsNullOrWhiteSpace(url))
+        client.BaseAddress = new Uri(url.TrimEnd('/') + "/");
+});
 builder.Services.AddSingleton<IEventPublisher, ConfiguredEventPublisher>();
 builder.Services.AddSingleton(_ =>
 {
@@ -144,7 +150,8 @@ app.MapGet("/api/users/me", async (ClaimsPrincipal principal, HttpContext contex
     if (user is null) return Results.NotFound(new { error = "User not found." });
     var token = ExtractBearerToken(context);
     var (followerCount, followingCount, _) = await FetchSocialAsync(user.Id, userId, httpClientFactory, token, ct);
-    return Results.Ok(ToProfile(user, userId, followerCount, followingCount));
+    var recentPosts = await FetchPostsAsync(user.Id, httpClientFactory, token, ct);
+    return Results.Ok(ToProfile(user, userId, followerCount, followingCount, recentPosts: recentPosts));
 }).RequireAuthorization();
 
 app.MapGet("/api/users/{id:guid}", async (Guid id, ClaimsPrincipal principal, HttpContext context, IMongoCollection<UserDocument> users, IHttpClientFactory httpClientFactory, CancellationToken ct) =>
@@ -154,7 +161,8 @@ app.MapGet("/api/users/{id:guid}", async (Guid id, ClaimsPrincipal principal, Ht
     var requesterId = principal.GetUserId();
     var token = ExtractBearerToken(context);
     var (followerCount, followingCount, isFollowedByMe) = await FetchSocialAsync(user.Id, requesterId, httpClientFactory, token, ct);
-    return Results.Ok(ToProfile(user, requesterId, followerCount, followingCount, isFollowedByMe));
+    var recentPosts = await FetchPostsAsync(user.Id, httpClientFactory, token, ct);
+    return Results.Ok(ToProfile(user, requesterId, followerCount, followingCount, isFollowedByMe, recentPosts));
 }).RequireAuthorization();
 
 app.MapGet("/api/users/by-handle/{handle}", async (string handle, ClaimsPrincipal principal, HttpContext context, IMongoCollection<UserDocument> users, IHttpClientFactory httpClientFactory, CancellationToken ct) =>
@@ -165,7 +173,8 @@ app.MapGet("/api/users/by-handle/{handle}", async (string handle, ClaimsPrincipa
     var requesterId = principal.GetUserId();
     var token = ExtractBearerToken(context);
     var (followerCount, followingCount, isFollowedByMe) = await FetchSocialAsync(user.Id, requesterId, httpClientFactory, token, ct);
-    return Results.Ok(ToProfile(user, requesterId, followerCount, followingCount, isFollowedByMe));
+    var recentPosts = await FetchPostsAsync(user.Id, httpClientFactory, token, ct);
+    return Results.Ok(ToProfile(user, requesterId, followerCount, followingCount, isFollowedByMe, recentPosts));
 }).RequireAuthorization();
 
 app.MapGet("/api/users/search", async (string? q, int limit, int offset, IMongoCollection<UserDocument> users, CancellationToken ct) =>
@@ -472,8 +481,29 @@ static async Task<(int FollowerCount, int FollowingCount, bool IsFollowedByMe)> 
     }
 }
 
-static UserProfileDto ToProfile(UserDocument user, Guid? requesterId, int followerCount, int followingCount, bool isFollowedByMe = false) =>
-    new(user.Id, user.Username, user.Handle, user.DisplayName, user.RegisteredAt, followerCount, followingCount, requesterId == user.Id, isFollowedByMe);
+static async Task<List<PostSummaryDto>?> FetchPostsAsync(
+    Guid userId, IHttpClientFactory httpClientFactory, string? bearerToken, CancellationToken ct)
+{
+    try
+    {
+        var client = httpClientFactory.CreateClient("PostApi");
+        if (client.BaseAddress is null) return null;
+
+        var req = new HttpRequestMessage(HttpMethod.Get, $"api/posts/by-user/{userId}?limit=20&offset=0");
+        if (bearerToken is not null)
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bearerToken);
+        var resp = await client.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<List<PostSummaryDto>>(ct);
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+static UserProfileDto ToProfile(UserDocument user, Guid? requesterId, int followerCount, int followingCount, bool isFollowedByMe = false, List<PostSummaryDto>? recentPosts = null) =>
+    new(user.Id, user.Username, user.Handle, user.DisplayName, user.RegisteredAt, followerCount, followingCount, requesterId == user.Id, isFollowedByMe, recentPosts);
 
 static string CreateToken(UserDocument user, IConfiguration configuration)
 {
@@ -512,7 +542,8 @@ public sealed record RegisterRequest(string Email, string Password, string Handl
 public sealed record LoginRequest(string Email, string Password);
 public sealed record UpdateDisplayNameRequest(string DisplayName);
 public sealed record TokenResponse(string Token, Guid UserId, string Username, string Handle, string DisplayName);
-public sealed record UserProfileDto(Guid UserId, string Username, string Handle, string DisplayName, DateTimeOffset RegisteredAt, int FollowerCount, int FollowingCount, bool IsOwnProfile, bool IsFollowedByMe);
+public sealed record UserProfileDto(Guid UserId, string Username, string Handle, string DisplayName, DateTimeOffset RegisteredAt, int FollowerCount, int FollowingCount, bool IsOwnProfile, bool IsFollowedByMe, List<PostSummaryDto>? RecentPosts = null);
+public sealed record PostSummaryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, int ReplyCount = 0, int RepostCount = 0, int LikeCount = 0, bool RepostedByMe = false, bool LikedByMe = false);
 public sealed record UserSearchResultDto(Guid UserId, string Handle, string DisplayName);
 public sealed record PasswordResetRequest(string Email);
 public sealed record ResetPasswordRequest(string Token, string NewPassword);

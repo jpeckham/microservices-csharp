@@ -38,7 +38,7 @@ public sealed class IntegrationFixture : IAsyncLifetime
 
         // Social must be started before Identity so its test handler can be wired in
         Social = _socialFactory.CreateClient();
-        _identityFactory = new IdentityApiFactory(cs, _socialFactory);
+        _identityFactory = new IdentityApiFactory(cs, _socialFactory, _postFactory);
 
         Identity = _identityFactory.CreateClient();
         Post = _postFactory.CreateClient();
@@ -94,7 +94,7 @@ public sealed class IntegrationCollection : ICollectionFixture<IntegrationFixtur
 
 public sealed record AuthSession(Guid UserId, string Token, string Handle, string DisplayName);
 public sealed record TokenDto(string Token, Guid UserId, string Username, string Handle, string DisplayName);
-public sealed record UserProfileDto(Guid UserId, string Username, string Handle, string DisplayName, int FollowerCount, int FollowingCount, bool IsOwnProfile, bool IsFollowedByMe);
+public sealed record UserProfileDto(Guid UserId, string Username, string Handle, string DisplayName, int FollowerCount, int FollowingCount, bool IsOwnProfile, bool IsFollowedByMe, List<PostDto>? RecentPosts = null);
 public sealed record QuotedPostDto(Guid PostId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt);
 public sealed record ContentSegmentDto(int Sequence, string Text, string? MentionHandle = null, string? HashtagText = null);
 public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string>? Hashtags = null, List<string>? Mentions = null, List<ContentSegmentDto>? ContentSegments = null, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, int LikeCount = 0, bool RepostedByMe = false, bool LikedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null, List<PostDto>? RecentReplies = null);
