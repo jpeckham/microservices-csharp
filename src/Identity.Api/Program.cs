@@ -510,8 +510,8 @@ static string CreateToken(UserDocument user, IConfiguration configuration)
     var jwtKey = configuration["Jwt:Key"] ?? "local-development-secret-change-me-32";
     var claims = new[]
     {
-        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-        new Claim(ClaimTypes.Name, user.Username),
+        new Claim(JwtRegisteredClaimNames.NameId, user.Id.ToString()),
+        new Claim(JwtRegisteredClaimNames.UniqueName, user.Username),
         new Claim(AuthConstants.HandleClaim, user.Handle),
         new Claim(AuthConstants.DisplayNameClaim, user.DisplayName)
     };
