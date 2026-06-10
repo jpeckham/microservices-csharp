@@ -621,6 +621,78 @@ public sealed class PostApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Repost_returns_201_with_original_id()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Original post" });
+        var createResp = await fx.Post.SendAsync(createReq);
+        var original = await createResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "Great post!" });
+        var repostResp = await fx.Post.SendAsync(repostReq);
+
+        Assert.Equal(HttpStatusCode.Created, repostResp.StatusCode);
+        var repost = await repostResp.Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(original.PostId, repost!.OriginalPostId);
+        Assert.Equal(reposter.UserId, repost.AuthorId);
+    }
+
+    [Fact]
+    public async Task Repost_own_post_returns_409()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "My post" });
+        var createResp = await fx.Post.SendAsync(createReq);
+        var original = await createResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", session.Token, new { content = "" });
+        var response = await fx.Post.SendAsync(repostReq);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Repost_same_post_twice_returns_409()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Original" });
+        var createResp = await fx.Post.SendAsync(createReq);
+        var original = await createResp.Content.ReadFromJsonAsync<PostDto>();
+
+        using var r1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(r1);
+
+        using var r2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original.PostId}/reposts", reposter.Token, new { content = "" });
+        var response = await fx.Post.SendAsync(r2);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Repost_nonexistent_post_returns_404()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{Guid.NewGuid()}/reposts", session.Token, new { content = "" });
+        var response = await fx.Post.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Repost_without_auth_returns_401()
+    {
+        var response = await fx.Post.PostAsJsonAsync($"/api/posts/{Guid.NewGuid()}/reposts", new { content = "" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);

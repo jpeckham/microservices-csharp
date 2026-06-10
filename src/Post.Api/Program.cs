@@ -191,6 +191,56 @@ app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, i
     return Results.Ok(result.Select(ToDto));
 }).RequireAuthorization();
 
+app.MapPost("/api/posts/{postId:guid}/reposts", async (
+    Guid postId,
+    CreatePostRequest request,
+    ClaimsPrincipal principal,
+    IMongoCollection<PostDocument> posts,
+    IEventPublisher events,
+    CancellationToken ct) =>
+{
+    var userId = principal.GetUserId();
+    if (userId is null) return Results.Unauthorized();
+    if (request.Content.Length > 280)
+        return Results.BadRequest(new { error = "Post content must be 280 characters or fewer." });
+
+    var target = await posts.Find(p => p.Id == postId).FirstOrDefaultAsync(ct);
+    if (target is null) return Results.NotFound(new { error = "Post not found." });
+
+    // Resolve to the root original post (no repost chains deeper than one)
+    var rootId = target.OriginalPostId ?? target.Id;
+    var root = target.OriginalPostId.HasValue
+        ? await posts.Find(p => p.Id == rootId).FirstOrDefaultAsync(ct)
+        : target;
+    if (root is null) return Results.NotFound(new { error = "Original post not found." });
+
+    if (root.AuthorId == userId)
+        return Results.Conflict(new { error = "Users cannot repost their own posts." });
+
+    var existingRepost = await posts.Find(p => p.OriginalPostId == rootId && p.AuthorId == userId).FirstOrDefaultAsync(ct);
+    if (existingRepost is not null)
+        return Results.Conflict(new { error = "Users can repost a post only once." });
+
+    var content = request.Content.Trim();
+    var repost = new PostDocument
+    {
+        Id = Guid.NewGuid(),
+        AuthorId = userId.Value,
+        AuthorHandle = principal.FindFirstValue(AuthConstants.HandleClaim) ?? $"@{userId.Value.ToString()[..8]}",
+        AuthorDisplayName = principal.FindFirstValue(AuthConstants.DisplayNameClaim) ?? "Unknown user",
+        Content = content,
+        OriginalPostId = rootId,
+        Hashtags = HashtagExtractor.Extract(content),
+        Mentions = MentionExtractor.Extract(content),
+        PostedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow
+    };
+
+    await posts.InsertOneAsync(repost, cancellationToken: ct);
+    await events.PublishAsync(new PostCreated(repost.Id, repost.AuthorId, repost.AuthorHandle, repost.AuthorDisplayName, repost.Content, DateTimeOffset.UtcNow), ct);
+    return Results.Created($"/api/posts/{repost.Id}", ToDto(repost));
+}).RequireAuthorization();
+
 app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
     var result = await posts.Find(p => p.AuthorId == userId)
@@ -230,7 +280,7 @@ app.MapHealthChecks("/health");
 app.Run();
 
 static PostDto ToDto(PostDocument post) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId);
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId);
 
 public sealed class PostDocument
 {
@@ -244,6 +294,8 @@ public sealed class PostDocument
     public string Content { get; set; } = "";
     [BsonGuidRepresentation(GuidRepresentation.Standard)]
     public Guid? ParentPostId { get; set; }
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid? OriginalPostId { get; set; }
     public List<string> Hashtags { get; set; } = [];
     public List<string> Mentions { get; set; } = [];
     public DateTimeOffset PostedAt { get; set; }
@@ -252,7 +304,7 @@ public sealed class PostDocument
 
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
 public static class HashtagExtractor
