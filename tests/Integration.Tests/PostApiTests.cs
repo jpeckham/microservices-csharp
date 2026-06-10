@@ -693,6 +693,68 @@ public sealed class PostApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task DeleteMyRepost_returns_204()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Original" });
+        var original = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repostReq);
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{original.PostId}/reposts/mine", reposter.Token);
+        var response = await fx.Post.SendAsync(deleteReq);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteMyRepost_when_not_reposted_returns_404()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var other = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post" });
+        var original = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{original!.PostId}/reposts/mine", other.Token);
+        var response = await fx.Post.SendAsync(deleteReq);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteMyRepost_after_delete_allows_repost_again()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Original" });
+        var original = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var r1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(r1);
+
+        using var del = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{original.PostId}/reposts/mine", reposter.Token);
+        await fx.Post.SendAsync(del);
+
+        using var r2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original.PostId}/reposts", reposter.Token, new { content = "" });
+        var resp = await fx.Post.SendAsync(r2);
+
+        Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteMyRepost_without_auth_returns_401()
+    {
+        var response = await fx.Post.DeleteAsync($"/api/posts/{Guid.NewGuid()}/reposts/mine");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);

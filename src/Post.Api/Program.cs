@@ -241,6 +241,28 @@ app.MapPost("/api/posts/{postId:guid}/reposts", async (
     return Results.Created($"/api/posts/{repost.Id}", ToDto(repost));
 }).RequireAuthorization();
 
+app.MapDelete("/api/posts/{postId:guid}/reposts/mine", async (
+    Guid postId,
+    ClaimsPrincipal principal,
+    IMongoCollection<PostDocument> posts,
+    IEventPublisher events,
+    CancellationToken ct) =>
+{
+    var userId = principal.GetUserId();
+    if (userId is null) return Results.Unauthorized();
+
+    var target = await posts.Find(p => p.Id == postId).FirstOrDefaultAsync(ct);
+    if (target is null) return Results.NotFound(new { error = "Post not found." });
+
+    var rootId = target.OriginalPostId ?? target.Id;
+    var myRepost = await posts.Find(p => p.OriginalPostId == rootId && p.AuthorId == userId).FirstOrDefaultAsync(ct);
+    if (myRepost is null) return Results.NotFound(new { error = "You have not reposted this post." });
+
+    await posts.DeleteOneAsync(p => p.Id == myRepost.Id, ct);
+    await events.PublishAsync(new PostDeleted(myRepost.Id, myRepost.AuthorId, DateTimeOffset.UtcNow), ct);
+    return Results.NoContent();
+}).RequireAuthorization();
+
 app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
     var result = await posts.Find(p => p.AuthorId == userId)
