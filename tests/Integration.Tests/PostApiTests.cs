@@ -521,21 +521,43 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
-    public async Task ReplyToPost_returns_201_with_parent_id()
+    public async Task ReplyToPost_returns_201_with_parent_id_and_prefixed_content()
     {
-        var session = await fx.RegisterAndLoginAsync();
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
 
-        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Original post" });
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Original post" });
         var createResp = await fx.Post.SendAsync(createReq);
         var parent = await createResp.Content.ReadFromJsonAsync<PostDto>();
 
-        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = "My reply" });
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", replier.Token, new { content = "My reply" });
         var replyResp = await fx.Post.SendAsync(replyReq);
 
         Assert.Equal(HttpStatusCode.Created, replyResp.StatusCode);
         var reply = await replyResp.Content.ReadFromJsonAsync<PostDto>();
-        Assert.Equal("My reply", reply!.Content);
-        Assert.Equal(parent.PostId, reply.ParentPostId);
+        Assert.Equal(parent.PostId, reply!.ParentPostId);
+        var expectedHandle = author.Handle.TrimStart('@').ToLowerInvariant();
+        Assert.StartsWith($"@{expectedHandle} ", reply.Content, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("My reply", reply.Content);
+    }
+
+    [Fact]
+    public async Task ReplyToPost_already_prefixed_content_is_not_doubled()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        var expectedHandle = author.Handle.TrimStart('@').ToLowerInvariant();
+        var alreadyPrefixed = $"@{expectedHandle} got it";
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", replier.Token, new { content = alreadyPrefixed });
+        var replyResp = await fx.Post.SendAsync(replyReq);
+
+        Assert.Equal(HttpStatusCode.Created, replyResp.StatusCode);
+        var reply = await replyResp.Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(alreadyPrefixed, reply!.Content);
     }
 
     [Fact]
@@ -593,8 +615,8 @@ public sealed class PostApiTests(IntegrationFixture fx)
         var replies = await listResp.Content.ReadFromJsonAsync<List<PostDto>>();
         Assert.Equal(2, replies!.Count);
         Assert.All(replies, r => Assert.Equal(parent.PostId, r.ParentPostId));
-        Assert.Equal("First reply", replies[0].Content);
-        Assert.Equal("Second reply", replies[1].Content);
+        Assert.Contains("First reply", replies[0].Content);
+        Assert.Contains("Second reply", replies[1].Content);
     }
 
     [Fact]

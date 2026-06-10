@@ -153,7 +153,7 @@ app.MapPost("/api/posts/{postId:guid}/replies", async (
     var parent = await posts.Find(p => p.Id == postId).FirstOrDefaultAsync(ct);
     if (parent is null) return Results.NotFound(new { error = "Parent post not found." });
 
-    var content = request.Content.Trim();
+    var content = PrefixReplyContent(parent.AuthorHandle, request.Content.Trim());
     var post = new PostDocument
     {
         Id = Guid.NewGuid(),
@@ -300,6 +300,17 @@ app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument
 
 app.MapHealthChecks("/health");
 app.Run();
+
+static string PrefixReplyContent(string parentAuthorHandle, string body)
+{
+    var normalized = parentAuthorHandle.TrimStart('@').Trim().ToLowerInvariant();
+    var prefix = $"@{normalized}";
+    if (string.IsNullOrWhiteSpace(body)) return prefix;
+    if (body.Equals(prefix, StringComparison.OrdinalIgnoreCase) ||
+        body.StartsWith(prefix + " ", StringComparison.OrdinalIgnoreCase))
+        return body;
+    return $"{prefix} {body}";
+}
 
 static PostDto ToDto(PostDocument post) =>
     new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId);
