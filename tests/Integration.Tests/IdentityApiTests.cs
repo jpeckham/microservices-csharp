@@ -812,6 +812,33 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
         Assert.Equal(1, post.LikeCount);
         Assert.True(post.LikedByMe);
     }
+
+    [Fact]
+    public async Task GetProfile_recent_posts_include_repost_count_and_reposted_by_me()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        var postResp = await fx.Post.SendAsync(
+            fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post to be reposted on profile" }));
+        postResp.EnsureSuccessStatusCode();
+        var createdPost = await postResp.Content.ReadFromJsonAsync<PostDto>();
+
+        var repostResp = await fx.Post.SendAsync(
+            fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{createdPost!.PostId}/reposts", reposter.Token, new { content = "" }));
+        repostResp.EnsureSuccessStatusCode();
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/by-handle/{author.Handle}", reposter.Token);
+        var resp = await fx.Identity.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var profile = await resp.Content.ReadFromJsonAsync<UserProfileDto>();
+        Assert.NotNull(profile);
+        var post = profile.RecentPosts?.FirstOrDefault(p => p.PostId == createdPost.PostId);
+        Assert.NotNull(post);
+        Assert.Equal(1, post.RepostCount);
+        Assert.True(post.RepostedByMe);
+    }
 }
 
 file sealed record PendingRegistrationDto(Guid PendingRegistrationId);
