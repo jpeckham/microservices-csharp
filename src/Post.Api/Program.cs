@@ -399,7 +399,7 @@ static string PrefixReplyContent(string parentAuthorHandle, string body)
 }
 
 static PostDto ToDto(PostDocument post, bool repostedByMe = false, QuotedPostDto? quotedPost = null, QuotedPostDto? replyTarget = null, List<PostDto>? recentReplies = null) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, repostedByMe, quotedPost, replyTarget, recentReplies);
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, ContentSegmentParser.Parse(post.Content), post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, repostedByMe, quotedPost, replyTarget, recentReplies);
 
 static QuotedPostDto ToQuotedDto(PostDocument post) =>
     new(post.Id, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt);
@@ -446,7 +446,8 @@ public sealed class PostDocument
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
 public sealed record QuotedPostDto(Guid PostId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null, List<PostDto>? RecentReplies = null);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, List<ContentSegmentDto> ContentSegments, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null, List<PostDto>? RecentReplies = null);
+public sealed record ContentSegmentDto(int Sequence, string Text, string? MentionHandle = null, string? HashtagText = null);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
 public static class HashtagExtractor
@@ -486,6 +487,36 @@ public static class MentionExtractor
         {
             return [];
         }
+    }
+}
+
+public static class ContentSegmentParser
+{
+    private static readonly Regex TokenPattern = new(@"(@[a-zA-Z][a-zA-Z0-9_]*|#[a-zA-Z][a-zA-Z0-9_]*)", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+
+    public static List<ContentSegmentDto> Parse(string content)
+    {
+        var segments = new List<ContentSegmentDto>();
+        MatchCollection matches;
+        try { matches = TokenPattern.Matches(content); }
+        catch (RegexMatchTimeoutException) { return [new ContentSegmentDto(0, content)]; }
+
+        int pos = 0, seq = 0;
+        foreach (Match m in matches)
+        {
+            if (m.Index > pos)
+                segments.Add(new ContentSegmentDto(seq++, content[pos..m.Index]));
+            if (m.Value[0] == '@')
+                segments.Add(new ContentSegmentDto(seq++, m.Value, MentionHandle: m.Value[1..].ToLowerInvariant()));
+            else
+                segments.Add(new ContentSegmentDto(seq++, m.Value, HashtagText: m.Value[1..].ToLowerInvariant()));
+            pos = m.Index + m.Length;
+        }
+        if (pos < content.Length)
+            segments.Add(new ContentSegmentDto(seq++, content[pos..]));
+        if (segments.Count == 0)
+            segments.Add(new ContentSegmentDto(0, content));
+        return segments;
     }
 }
 

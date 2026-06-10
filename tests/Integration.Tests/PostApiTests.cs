@@ -1456,6 +1456,98 @@ public sealed class PostApiTests(IntegrationFixture fx)
         Assert.Contains(fetched!.RecentReplies!, r => r.PostId == kept!.PostId);
         Assert.DoesNotContain(fetched.RecentReplies!, r => r.PostId == toDelete.PostId);
     }
+
+    [Fact]
+    public async Task CreatePost_plain_text_has_single_segment_with_no_mention_or_hashtag()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var req = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hello world" });
+
+        var response = await fx.Post.SendAsync(req);
+
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.ContentSegments);
+        Assert.Single(post.ContentSegments!);
+        Assert.Equal("Hello world", post.ContentSegments![0].Text);
+        Assert.Null(post.ContentSegments[0].MentionHandle);
+        Assert.Null(post.ContentSegments[0].HashtagText);
+    }
+
+    [Fact]
+    public async Task CreatePost_with_mention_produces_mention_segment()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var req = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hello @alice how are you" });
+
+        var response = await fx.Post.SendAsync(req);
+
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.ContentSegments);
+        var mention = post.ContentSegments!.Single(s => s.MentionHandle is not null);
+        Assert.Equal("alice", mention.MentionHandle);
+        Assert.Equal("@alice", mention.Text);
+        Assert.Null(mention.HashtagText);
+    }
+
+    [Fact]
+    public async Task CreatePost_with_hashtag_produces_hashtag_segment()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var req = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Loving #dotnet today" });
+
+        var response = await fx.Post.SendAsync(req);
+
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        Assert.NotNull(post!.ContentSegments);
+        var hashtag = post.ContentSegments!.Single(s => s.HashtagText is not null);
+        Assert.Equal("dotnet", hashtag.HashtagText);
+        Assert.Equal("#dotnet", hashtag.Text);
+        Assert.Null(hashtag.MentionHandle);
+    }
+
+    [Fact]
+    public async Task CreatePost_segments_are_in_order_and_cover_full_content()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var req = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hi @bob check out #csharp rocks" });
+
+        var response = await fx.Post.SendAsync(req);
+
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        var segments = post!.ContentSegments!;
+        Assert.Equal("Hi @bob check out #csharp rocks", string.Concat(segments.Select(s => s.Text)));
+        Assert.Equal(segments.Select((s, i) => i), segments.Select(s => s.Sequence));
+    }
+
+    [Fact]
+    public async Task GetPost_returns_content_segments_on_fetched_post()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Hey @world #test" });
+        var created = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created!.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.NotNull(fetched!.ContentSegments);
+        Assert.Contains(fetched.ContentSegments!, s => s.MentionHandle == "world");
+        Assert.Contains(fetched.ContentSegments!, s => s.HashtagText == "test");
+    }
+
+    [Fact]
+    public async Task CreatePost_segments_sequence_numbers_start_at_zero_and_are_contiguous()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var req = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "one @alice two #dev three" });
+
+        var response = await fx.Post.SendAsync(req);
+
+        var post = await response.Content.ReadFromJsonAsync<PostDto>();
+        var seqs = post!.ContentSegments!.Select(s => s.Sequence).ToList();
+        Assert.Equal(0, seqs[0]);
+        for (int i = 1; i < seqs.Count; i++)
+            Assert.Equal(seqs[i - 1] + 1, seqs[i]);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
