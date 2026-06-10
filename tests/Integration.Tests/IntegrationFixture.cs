@@ -93,7 +93,8 @@ public sealed class IntegrationCollection : ICollectionFixture<IntegrationFixtur
 public sealed record AuthSession(Guid UserId, string Token, string Handle, string DisplayName);
 public sealed record TokenDto(string Token, Guid UserId, string Username, string Handle, string DisplayName);
 public sealed record UserProfileDto(Guid UserId, string Username, string Handle, string DisplayName, int FollowerCount, int FollowingCount, bool IsOwnProfile, bool IsFollowedByMe);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string>? Hashtags = null, List<string>? Mentions = null, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false);
+public sealed record QuotedPostDto(Guid PostId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string>? Hashtags = null, List<string>? Mentions = null, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null);
 public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string Content, DateTimeOffset PostedAt, int LikeCount, int CommentCount);
 public sealed record CommentDto(Guid CommentId, Guid PostId, Guid AuthorId, string AuthorHandle, string Content, DateTimeOffset CreatedAt);
 public sealed record FollowCountsDto(int FollowerCount, int FollowingCount);

@@ -1096,6 +1096,85 @@ public sealed class PostApiTests(IntegrationFixture fx)
         Assert.Contains(replies!, r => r.PostId == kept!.PostId);
         Assert.DoesNotContain(replies!, r => r.PostId == toDelete.PostId);
     }
+
+    [Fact]
+    public async Task GetPost_repost_includes_quoted_post_with_original_content()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Original content here" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "My quote" });
+        var repost = await (await fx.Post.SendAsync(repostReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{repost!.PostId}", reposter.Token);
+        var fetched = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.NotNull(fetched!.QuotedPost);
+        Assert.Equal(original.PostId, fetched.QuotedPost!.PostId);
+        Assert.Equal("Original content here", fetched.QuotedPost.Content);
+        Assert.Contains(author.Handle, fetched.QuotedPost.AuthorHandle);
+    }
+
+    [Fact]
+    public async Task GetPost_regular_post_has_null_quoted_post()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Just a post" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post!.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(get)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Null(fetched!.QuotedPost);
+    }
+
+    [Fact]
+    public async Task GetRecentPosts_reposts_include_quoted_post()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = $"Original {unique}" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repostReq);
+
+        using var recent = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/recent?limit=100", reposter.Token);
+        var posts = await (await fx.Post.SendAsync(recent)).Content.ReadFromJsonAsync<List<PostDto>>();
+
+        var repostInFeed = posts!.FirstOrDefault(p => p.OriginalPostId == original.PostId);
+        Assert.NotNull(repostInFeed);
+        Assert.NotNull(repostInFeed!.QuotedPost);
+        Assert.Equal($"Original {unique}", repostInFeed.QuotedPost!.Content);
+    }
+
+    [Fact]
+    public async Task SearchPosts_reposts_include_quoted_post()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = $"Searchable original {unique}" });
+        var original = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repostReq);
+
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=50&offset=0", reposter.Token);
+        var results = await (await fx.Post.SendAsync(search)).Content.ReadFromJsonAsync<SearchResultsDto>();
+
+        var repostResult = results!.Posts.FirstOrDefault(p => p.OriginalPostId == original.PostId);
+        Assert.NotNull(repostResult);
+        Assert.NotNull(repostResult!.QuotedPost);
+        Assert.Equal($"Searchable original {unique}", repostResult.QuotedPost!.Content);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
