@@ -433,6 +433,43 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task SearchPosts_excludes_replies()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"Root post {unique}" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = $"Reply with {unique}" });
+        await fx.Post.SendAsync(replyReq);
+
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=50&offset=0", session.Token);
+        var results = await (await fx.Post.SendAsync(search)).Content.ReadFromJsonAsync<SearchResultsDto>();
+
+        Assert.All(results!.Posts, p => Assert.Null(p.ParentPostId));
+        Assert.Contains(results.Posts, p => p.PostId == parent.PostId);
+    }
+
+    [Fact]
+    public async Task GetRecentPosts_excludes_replies()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"Root post {unique}" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = $"Reply with {unique}" });
+        await fx.Post.SendAsync(replyReq);
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/recent?limit=100", session.Token);
+        var posts = await (await fx.Post.SendAsync(req)).Content.ReadFromJsonAsync<List<PostDto>>();
+
+        Assert.All(posts!, p => Assert.Null(p.ParentPostId));
+    }
+
+    [Fact]
     public async Task HealthCheck_returns_healthy()
     {
         var response = await fx.Post.GetAsync("/health");

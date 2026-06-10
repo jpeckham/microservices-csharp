@@ -291,7 +291,9 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
         return Results.BadRequest(new { error = "Query parameter 'q' is required." });
 
     var escaped = System.Text.RegularExpressions.Regex.Escape(q);
-    var filter = Builders<PostDocument>.Filter.Regex(p => p.Content, new MongoDB.Bson.BsonRegularExpression(escaped, "i"));
+    var contentFilter = Builders<PostDocument>.Filter.Regex(p => p.Content, new MongoDB.Bson.BsonRegularExpression(escaped, "i"));
+    var rootOnlyFilter = Builders<PostDocument>.Filter.Eq(p => p.ParentPostId, null);
+    var filter = Builders<PostDocument>.Filter.And(rootOnlyFilter, contentFilter);
     var result = await posts.Find(filter)
         .SortByDescending(p => p.PostedAt)
         .Skip(offset)
@@ -303,7 +305,7 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
 app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
     var take = Math.Clamp(limit ?? 20, 1, 100);
-    var result = await posts.Find(_ => true)
+    var result = await posts.Find(p => p.ParentPostId == null)
         .SortByDescending(p => p.PostedAt)
         .Limit(take)
         .ToListAsync(ct);
