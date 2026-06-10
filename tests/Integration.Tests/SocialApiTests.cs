@@ -61,12 +61,16 @@ public sealed class SocialApiTests(IntegrationFixture fx)
         var follower = await fx.RegisterAndLoginAsync();
         var target = await fx.RegisterAndLoginAsync();
 
-        var before = await fx.Social.GetFromJsonAsync<FollowCountsDto>($"/api/users/{target.UserId}/counts");
+        using var beforeReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/{target.UserId}/counts", follower.Token);
+        var beforeResp = await fx.Social.SendAsync(beforeReq);
+        var before = await beforeResp.Content.ReadFromJsonAsync<FollowCountsDto>();
 
         using var follow = fx.AuthorizedRequest(HttpMethod.Post, $"/api/users/{target.UserId}/follows", follower.Token);
         await fx.Social.SendAsync(follow);
 
-        var after = await fx.Social.GetFromJsonAsync<FollowCountsDto>($"/api/users/{target.UserId}/counts");
+        using var afterReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/{target.UserId}/counts", follower.Token);
+        var afterResp = await fx.Social.SendAsync(afterReq);
+        var after = await afterResp.Content.ReadFromJsonAsync<FollowCountsDto>();
 
         Assert.Equal(before!.FollowerCount + 1, after!.FollowerCount);
     }
@@ -76,6 +80,33 @@ public sealed class SocialApiTests(IntegrationFixture fx)
     {
         var target = await fx.RegisterAndLoginAsync();
         var response = await fx.Social.DeleteAsync($"/api/users/{target.UserId}/follows");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetFollowers_without_auth_returns_401()
+    {
+        var target = await fx.RegisterAndLoginAsync();
+        var response = await fx.Social.GetAsync($"/api/users/{target.UserId}/followers");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetFollowing_without_auth_returns_401()
+    {
+        var target = await fx.RegisterAndLoginAsync();
+        var response = await fx.Social.GetAsync($"/api/users/{target.UserId}/following");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetCounts_without_auth_returns_401()
+    {
+        var target = await fx.RegisterAndLoginAsync();
+        var response = await fx.Social.GetAsync($"/api/users/{target.UserId}/counts");
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }

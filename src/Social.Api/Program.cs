@@ -96,20 +96,20 @@ app.MapGet("/api/users/{userId:guid}/followers", async (Guid userId, IMongoColle
 {
     var result = await follows.Find(f => f.FollowingId == userId).ToListAsync(ct);
     return Results.Ok(result.Select(f => f.FollowerId));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/users/{userId:guid}/following", async (Guid userId, IMongoCollection<FollowDocument> follows, CancellationToken ct) =>
 {
     var result = await follows.Find(f => f.FollowerId == userId).ToListAsync(ct);
     return Results.Ok(result.Select(f => f.FollowingId));
-});
+}).RequireAuthorization();
 
 app.MapGet("/api/users/{userId:guid}/counts", async (Guid userId, IMongoCollection<FollowDocument> follows, CancellationToken ct) =>
 {
     var followers = await follows.CountDocumentsAsync(f => f.FollowingId == userId, cancellationToken: ct);
     var following = await follows.CountDocumentsAsync(f => f.FollowerId == userId, cancellationToken: ct);
     return Results.Ok(new FollowCountsDto((int)followers, (int)following));
-});
+}).RequireAuthorization();
 
 app.MapHealthChecks("/health");
 app.Run();
