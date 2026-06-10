@@ -23,6 +23,7 @@ builder.Services.AddSingleton(_ =>
     return new MongoClient(connectionString).GetDatabase(databaseName);
 });
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<PostDocument>("posts"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<PostLikeDocument>("postLikes"));
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "local-development-secret-change-me-32";
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -189,12 +190,13 @@ app.MapPost("/api/posts/{postId:guid}/replies", async (
     return Results.Created($"/api/posts/{post.Id}", ToDto(post));
 }).RequireAuthorization();
 
-app.MapGet("/api/posts/{id:guid}", async (Guid id, ClaimsPrincipal principal, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+app.MapGet("/api/posts/{id:guid}", async (Guid id, ClaimsPrincipal principal, IMongoCollection<PostDocument> posts, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct) =>
 {
     var post = await posts.Find(p => p.Id == id && !p.IsDeleted).FirstOrDefaultAsync(ct);
     if (post is null) return Results.NotFound(new { error = "Post not found." });
     var userId = principal.GetUserId();
     var repostedByMe = userId.HasValue && await posts.Find(p => p.OriginalPostId == id && p.AuthorId == userId && !p.IsDeleted).AnyAsync(ct);
+    var likedByMe = userId.HasValue && await postLikes.Find(l => l.PostId == id && l.UserId == userId.Value).AnyAsync(ct);
     QuotedPostDto? quotedPost = null;
     if (post.OriginalPostId.HasValue)
     {
@@ -213,10 +215,10 @@ app.MapGet("/api/posts/{id:guid}", async (Guid id, ClaimsPrincipal principal, IM
         .ToListAsync(ct);
     var currentAsQuoted = ToQuotedDto(post);
     var recentReplies = rawReplies.Select(r => ToDto(r, replyTarget: currentAsQuoted)).ToList();
-    return Results.Ok(ToDto(post, repostedByMe, quotedPost, replyTarget, recentReplies));
+    return Results.Ok(ToDto(post, repostedByMe, likedByMe, quotedPost, replyTarget, recentReplies));
 }).RequireAuthorization();
 
-app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, int? offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, int? offset, ClaimsPrincipal principal, IMongoCollection<PostDocument> posts, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct) =>
 {
     var take = Math.Clamp(limit ?? 20, 1, 100);
     var skip = Math.Max(offset ?? 0, 0);
@@ -226,7 +228,8 @@ app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, i
         .Limit(take)
         .ToListAsync(ct);
     var originals = await LoadOriginals(result, posts, ct);
-    return Results.Ok(result.Select(p => ToDto(p, quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
+    var likedIds = await LoadLikedIds(result.Select(p => p.Id), principal, postLikes, ct);
+    return Results.Ok(result.Select(p => ToDto(p, likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
 }).RequireAuthorization();
 
 app.MapPost("/api/posts/{postId:guid}/reposts", async (
@@ -310,7 +313,7 @@ app.MapDelete("/api/posts/{postId:guid}/reposts/mine", async (
     return Results.NoContent();
 }).RequireAuthorization();
 
-app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, int offset, ClaimsPrincipal principal, IMongoCollection<PostDocument> posts, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct) =>
 {
     var result = await posts.Find(p => p.AuthorId == userId && !p.IsDeleted)
         .SortByDescending(p => p.PostedAt)
@@ -319,13 +322,15 @@ app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, in
         .ToListAsync(ct);
     var originals = await LoadOriginals(result, posts, ct);
     var parents = await LoadParents(result, posts, ct);
+    var likedIds = await LoadLikedIds(result.Select(p => p.Id), principal, postLikes, ct);
     return Results.Ok(result.Select(p => ToDto(
         p,
+        likedByMe: likedIds.Contains(p.Id),
         quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null,
         replyTarget: p.ParentPostId.HasValue && parents.TryGetValue(p.ParentPostId.Value, out var par) ? ToQuotedDto(par) : null)));
 }).RequireAuthorization();
 
-app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+app.MapGet("/api/posts/search", async (string? q, int limit, int offset, ClaimsPrincipal principal, IMongoCollection<PostDocument> posts, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(q))
         return Results.BadRequest(new { error = "Query parameter 'q' is required." });
@@ -369,11 +374,12 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
     var originals = await LoadOriginals(result, posts, ct);
-    var dtos = result.Select(p => ToDto(p, quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)).ToList();
+    var likedIds = await LoadLikedIds(result.Select(p => p.Id), principal, postLikes, ct);
+    var dtos = result.Select(p => ToDto(p, likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)).ToList();
     return Results.Ok(new SearchResultsDto(dtos, q ?? "", limit, offset));
 }).RequireAuthorization();
 
-app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+app.MapGet("/api/posts/recent", async (int? limit, ClaimsPrincipal principal, IMongoCollection<PostDocument> posts, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct) =>
 {
     var take = Math.Clamp(limit ?? 20, 1, 100);
     var result = await posts.Find(p => p.ParentPostId == null && !p.IsDeleted)
@@ -381,24 +387,28 @@ app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument
         .Limit(take)
         .ToListAsync(ct);
     var originals = await LoadOriginals(result, posts, ct);
-    return Results.Ok(result.Select(p => ToDto(p, quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
+    var likedIds = await LoadLikedIds(result.Select(p => p.Id), principal, postLikes, ct);
+    return Results.Ok(result.Select(p => ToDto(p, likedByMe: likedIds.Contains(p.Id), quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
 }).RequireAuthorization();
 
-app.MapPost("/events/LikeAdded", async (LikeAdded integrationEvent, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+app.MapPost("/events/LikeAdded", async (LikeAdded integrationEvent, IMongoCollection<PostDocument> posts, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct) =>
 {
     await posts.UpdateOneAsync(
         p => p.Id == integrationEvent.PostId,
         Builders<PostDocument>.Update.Inc(p => p.LikeCount, 1),
         cancellationToken: ct);
+    var like = new PostLikeDocument { PostId = integrationEvent.PostId, UserId = integrationEvent.UserId };
+    await postLikes.ReplaceOneAsync(l => l.PostId == like.PostId && l.UserId == like.UserId, like, new ReplaceOptions { IsUpsert = true }, ct);
     return Results.Accepted();
 });
 
-app.MapPost("/events/LikeRemoved", async (LikeRemoved integrationEvent, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+app.MapPost("/events/LikeRemoved", async (LikeRemoved integrationEvent, IMongoCollection<PostDocument> posts, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct) =>
 {
     await posts.UpdateOneAsync(
         p => p.Id == integrationEvent.PostId && p.LikeCount > 0,
         Builders<PostDocument>.Update.Inc(p => p.LikeCount, -1),
         cancellationToken: ct);
+    await postLikes.DeleteOneAsync(l => l.PostId == integrationEvent.PostId && l.UserId == integrationEvent.UserId, ct);
     return Results.Accepted();
 });
 
@@ -416,8 +426,8 @@ static string PrefixReplyContent(string parentAuthorHandle, string body)
     return $"{prefix} {body}";
 }
 
-static PostDto ToDto(PostDocument post, bool repostedByMe = false, QuotedPostDto? quotedPost = null, QuotedPostDto? replyTarget = null, List<PostDto>? recentReplies = null) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, ContentSegmentParser.Parse(post.Content), post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, post.LikeCount, repostedByMe, quotedPost, replyTarget, recentReplies);
+static PostDto ToDto(PostDocument post, bool repostedByMe = false, bool likedByMe = false, QuotedPostDto? quotedPost = null, QuotedPostDto? replyTarget = null, List<PostDto>? recentReplies = null) =>
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, ContentSegmentParser.Parse(post.Content), post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, post.LikeCount, repostedByMe, likedByMe, quotedPost, replyTarget, recentReplies);
 
 static QuotedPostDto ToQuotedDto(PostDocument post) =>
     new(post.Id, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt);
@@ -436,6 +446,17 @@ static async Task<Dictionary<Guid, PostDocument>> LoadParents(List<PostDocument>
     if (ids.Count == 0) return [];
     var parents = await collection.Find(p => ids.Contains(p.Id) && !p.IsDeleted).ToListAsync(ct);
     return parents.ToDictionary(p => p.Id);
+}
+
+static async Task<HashSet<Guid>> LoadLikedIds(IEnumerable<Guid> postIds, ClaimsPrincipal principal, IMongoCollection<PostLikeDocument> postLikes, CancellationToken ct)
+{
+    var userId = principal.GetUserId();
+    if (!userId.HasValue) return [];
+    var ids = postIds.ToList();
+    if (ids.Count == 0) return [];
+    return (await postLikes.Find(l => l.UserId == userId.Value && ids.Contains(l.PostId))
+        .Project(l => l.PostId)
+        .ToListAsync(ct)).ToHashSet();
 }
 
 public sealed class PostDocument
@@ -462,10 +483,19 @@ public sealed class PostDocument
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
+public sealed class PostLikeDocument
+{
+    [BsonId]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid PostId { get; set; }
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid UserId { get; set; }
+}
+
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
 public sealed record QuotedPostDto(Guid PostId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, List<ContentSegmentDto> ContentSegments, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, int LikeCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null, List<PostDto>? RecentReplies = null);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, List<ContentSegmentDto> ContentSegments, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, int LikeCount = 0, bool RepostedByMe = false, bool LikedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null, List<PostDto>? RecentReplies = null);
 public sealed record ContentSegmentDto(int Sequence, string Text, string? MentionHandle = null, string? HashtagText = null);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
