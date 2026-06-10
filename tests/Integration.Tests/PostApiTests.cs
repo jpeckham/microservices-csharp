@@ -1548,6 +1548,110 @@ public sealed class PostApiTests(IntegrationFixture fx)
         for (int i = 1; i < seqs.Count; i++)
             Assert.Equal(seqs[i - 1] + 1, seqs[i]);
     }
+
+    [Fact]
+    public async Task GetPost_LikeCount_is_zero_before_any_likes()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "No likes yet" });
+        var created = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created!.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Equal(0, fetched!.LikeCount);
+    }
+
+    [Fact]
+    public async Task GetPost_LikeCount_increments_after_LikeAdded_event()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Like me" });
+        var created = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        var likeResponse = await fx.Post.PostAsJsonAsync("/events/LikeAdded", new
+        {
+            LikeId = Guid.NewGuid(),
+            PostId = created!.PostId,
+            UserId = Guid.NewGuid(),
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+        Assert.Equal(HttpStatusCode.Accepted, likeResponse.StatusCode);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Equal(1, fetched!.LikeCount);
+    }
+
+    [Fact]
+    public async Task GetPost_LikeCount_decrements_after_LikeRemoved_event()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Like and unlike" });
+        var created = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+        var likerId = Guid.NewGuid();
+
+        await fx.Post.PostAsJsonAsync("/events/LikeAdded", new
+        {
+            LikeId = Guid.NewGuid(),
+            PostId = created!.PostId,
+            UserId = likerId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        var removeResponse = await fx.Post.PostAsJsonAsync("/events/LikeRemoved", new
+        {
+            LikeId = Guid.NewGuid(),
+            PostId = created.PostId,
+            UserId = likerId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+        Assert.Equal(HttpStatusCode.Accepted, removeResponse.StatusCode);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Equal(0, fetched!.LikeCount);
+    }
+
+    [Fact]
+    public async Task GetPost_LikeCount_does_not_go_below_zero()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Already at zero likes" });
+        var created = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        await fx.Post.PostAsJsonAsync("/events/LikeRemoved", new
+        {
+            LikeId = Guid.NewGuid(),
+            PostId = created!.PostId,
+            UserId = Guid.NewGuid(),
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Equal(0, fetched!.LikeCount);
+    }
+
+    [Fact]
+    public async Task GetPost_LikeCount_accumulates_from_multiple_users()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Popular post" });
+        var created = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        await fx.Post.PostAsJsonAsync("/events/LikeAdded", new { LikeId = Guid.NewGuid(), PostId = created!.PostId, UserId = Guid.NewGuid(), OccurredAt = DateTimeOffset.UtcNow });
+        await fx.Post.PostAsJsonAsync("/events/LikeAdded", new { LikeId = Guid.NewGuid(), PostId = created.PostId, UserId = Guid.NewGuid(), OccurredAt = DateTimeOffset.UtcNow });
+        await fx.Post.PostAsJsonAsync("/events/LikeAdded", new { LikeId = Guid.NewGuid(), PostId = created.PostId, UserId = Guid.NewGuid(), OccurredAt = DateTimeOffset.UtcNow });
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Equal(3, fetched!.LikeCount);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);

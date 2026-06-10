@@ -384,6 +384,24 @@ app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument
     return Results.Ok(result.Select(p => ToDto(p, quotedPost: p.OriginalPostId.HasValue && originals.TryGetValue(p.OriginalPostId.Value, out var o) ? ToQuotedDto(o) : null)));
 }).RequireAuthorization();
 
+app.MapPost("/events/LikeAdded", async (LikeAdded integrationEvent, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+{
+    await posts.UpdateOneAsync(
+        p => p.Id == integrationEvent.PostId,
+        Builders<PostDocument>.Update.Inc(p => p.LikeCount, 1),
+        cancellationToken: ct);
+    return Results.Accepted();
+});
+
+app.MapPost("/events/LikeRemoved", async (LikeRemoved integrationEvent, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
+{
+    await posts.UpdateOneAsync(
+        p => p.Id == integrationEvent.PostId && p.LikeCount > 0,
+        Builders<PostDocument>.Update.Inc(p => p.LikeCount, -1),
+        cancellationToken: ct);
+    return Results.Accepted();
+});
+
 app.MapHealthChecks("/health");
 app.Run();
 
@@ -399,7 +417,7 @@ static string PrefixReplyContent(string parentAuthorHandle, string body)
 }
 
 static PostDto ToDto(PostDocument post, bool repostedByMe = false, QuotedPostDto? quotedPost = null, QuotedPostDto? replyTarget = null, List<PostDto>? recentReplies = null) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, ContentSegmentParser.Parse(post.Content), post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, repostedByMe, quotedPost, replyTarget, recentReplies);
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, ContentSegmentParser.Parse(post.Content), post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, post.LikeCount, repostedByMe, quotedPost, replyTarget, recentReplies);
 
 static QuotedPostDto ToQuotedDto(PostDocument post) =>
     new(post.Id, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt);
@@ -438,6 +456,7 @@ public sealed class PostDocument
     public List<string> Mentions { get; set; } = [];
     public int ReplyCount { get; set; }
     public int RepostCount { get; set; }
+    public int LikeCount { get; set; }
     public bool IsDeleted { get; set; }
     public DateTimeOffset PostedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -446,7 +465,7 @@ public sealed class PostDocument
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
 public sealed record QuotedPostDto(Guid PostId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, List<ContentSegmentDto> ContentSegments, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null, List<PostDto>? RecentReplies = null);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, List<ContentSegmentDto> ContentSegments, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, int LikeCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null, List<PostDto>? RecentReplies = null);
 public sealed record ContentSegmentDto(int Sequence, string Text, string? MentionHandle = null, string? HashtagText = null);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
