@@ -137,6 +137,21 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task RequestReset_email_body_mentions_5_minute_expiry()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var email = $"{id}@test.com";
+        await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email, password = "Pass123!", handle = id, displayName = $"User {id}" });
+
+        await fx.Identity.PostAsJsonAsync("/api/password-reset-requests", new { email });
+
+        var emails = await fx.GetDevEmailsAsync();
+        var resetEmail = emails.First(m => m.To == email && m.Body.Contains("?token="));
+        Assert.Contains("5 minutes", resetEmail.Body);
+    }
+
+    [Fact]
     public async Task ResetPassword_with_valid_token_updates_password_and_allows_login()
     {
         var id = Guid.NewGuid().ToString("N")[..10];

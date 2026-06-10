@@ -212,14 +212,14 @@ app.MapPost("/api/password-reset-requests", async (
                 Id = Guid.NewGuid(),
                 UserId = user.Id,
                 Token = Guid.NewGuid().ToString("N"),
-                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(15),
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5),
                 Consumed = false
             };
             await tokens.InsertOneAsync(tokenDoc, cancellationToken: ct);
             var baseUrl = configuration["PasswordReset:BaseUrl"] ?? "http://localhost:5106";
             var resetLink = $"{baseUrl}/reset-password?token={tokenDoc.Token}";
             await emailSender.SendAsync(user.Email, "Reset your password",
-                $"Click here to reset your password: {resetLink}");
+                $"Use this one-time link within 5 minutes: {resetLink}");
         }
     }
     return Results.NoContent();
