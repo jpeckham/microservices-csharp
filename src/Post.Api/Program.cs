@@ -147,9 +147,11 @@ app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, in
 
 app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
-    var filter = string.IsNullOrWhiteSpace(q)
-        ? Builders<PostDocument>.Filter.Empty
-        : Builders<PostDocument>.Filter.Regex(p => p.Content, new MongoDB.Bson.BsonRegularExpression(q, "i"));
+    if (string.IsNullOrWhiteSpace(q))
+        return Results.BadRequest(new { error = "Query parameter 'q' is required." });
+
+    var escaped = System.Text.RegularExpressions.Regex.Escape(q);
+    var filter = Builders<PostDocument>.Filter.Regex(p => p.Content, new MongoDB.Bson.BsonRegularExpression(escaped, "i"));
     var result = await posts.Find(filter)
         .SortByDescending(p => p.PostedAt)
         .Skip(offset)

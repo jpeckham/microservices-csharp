@@ -306,6 +306,43 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task SearchPosts_with_empty_query_returns_400()
+    {
+        var response = await fx.Post.GetAsync("/api/posts/search?q=&limit=10&offset=0");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SearchPosts_with_regex_special_chars_does_not_error()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "price is $5.00 today" });
+        await fx.Post.SendAsync(create);
+
+        var response = await fx.Post.GetAsync("/api/posts/search?q=%245.00&limit=10&offset=0");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SearchPosts_with_dot_query_matches_only_literal_dot()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        using var exact = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"hello.world {unique}" });
+        using var noMatch = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"helloXworld {unique}" });
+        await fx.Post.SendAsync(exact);
+        await fx.Post.SendAsync(noMatch);
+
+        var response = await fx.Post.GetAsync($"/api/posts/search?q=hello.world+{unique}&limit=10&offset=0");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var results = await response.Content.ReadFromJsonAsync<SearchResultsDto>();
+        Assert.All(results!.Posts, p => Assert.Contains(".", p.Content));
+    }
+
+    [Fact]
     public async Task CreatePost_with_very_long_content_does_not_throw_and_extracts_tags()
     {
         var session = await fx.RegisterAndLoginAsync();
