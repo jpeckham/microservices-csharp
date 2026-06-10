@@ -509,6 +509,46 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task Register_without_display_name_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_with_empty_display_name_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = id, displayName = "" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_without_display_name_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_with_empty_display_name_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = id, displayName = "   " });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task VerifyRegistration_with_wrong_code_returns_400()
     {
         var id = Guid.NewGuid().ToString("N")[..10];

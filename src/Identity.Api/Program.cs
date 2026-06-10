@@ -68,9 +68,10 @@ app.MapPost("/api/users/register", async (
 {
     if (string.IsNullOrWhiteSpace(request.Email) ||
         string.IsNullOrWhiteSpace(request.Password) ||
-        string.IsNullOrWhiteSpace(request.Handle))
+        string.IsNullOrWhiteSpace(request.Handle) ||
+        string.IsNullOrWhiteSpace(request.DisplayName))
     {
-        return Results.BadRequest(new { error = "Email, password, and handle are required." });
+        return Results.BadRequest(new { error = "Email, password, handle, and display name are required." });
     }
 
     if (!IsValidEmail(request.Email))
@@ -82,7 +83,7 @@ app.MapPost("/api/users/register", async (
     if (!IsValidHandle(request.Handle))
         return Results.BadRequest(new { error = "Handle must contain only letters, digits, and underscores." });
 
-    if (!string.IsNullOrWhiteSpace(request.DisplayName) && request.DisplayName.Trim().Length > 50)
+    if (request.DisplayName.Trim().Length > 50)
         return Results.BadRequest(new { error = "Display name must be 50 characters or fewer." });
 
     var handle = NormalizeHandle(request.Handle);
@@ -98,7 +99,7 @@ app.MapPost("/api/users/register", async (
         Email = request.Email.Trim().ToLowerInvariant(),
         Username = handle.TrimStart('@'),
         Handle = handle,
-        DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? handle.TrimStart('@') : request.DisplayName.Trim(),
+        DisplayName = request.DisplayName.Trim(),
         RegisteredAt = DateTimeOffset.UtcNow
     };
     user.PasswordHash = hasher.HashPassword(user, request.Password);
@@ -264,9 +265,10 @@ app.MapPost("/api/registrations", async (
 {
     if (string.IsNullOrWhiteSpace(request.Email) ||
         string.IsNullOrWhiteSpace(request.Password) ||
-        string.IsNullOrWhiteSpace(request.Handle))
+        string.IsNullOrWhiteSpace(request.Handle) ||
+        string.IsNullOrWhiteSpace(request.DisplayName))
     {
-        return Results.BadRequest(new { error = "Email, password, and handle are required." });
+        return Results.BadRequest(new { error = "Email, password, handle, and display name are required." });
     }
 
     if (!IsValidEmail(request.Email))
@@ -278,7 +280,7 @@ app.MapPost("/api/registrations", async (
     if (!IsValidHandle(request.Handle))
         return Results.BadRequest(new { error = "Handle must contain only letters, digits, and underscores." });
 
-    if (!string.IsNullOrWhiteSpace(request.DisplayName) && request.DisplayName.Trim().Length > 50)
+    if (request.DisplayName.Trim().Length > 50)
         return Results.BadRequest(new { error = "Display name must be 50 characters or fewer." });
 
     var email = request.Email.Trim().ToLowerInvariant();
@@ -301,7 +303,7 @@ app.MapPost("/api/registrations", async (
         Id = Guid.NewGuid(),
         Handle = handle,
         Email = email,
-        DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? handle.TrimStart('@') : request.DisplayName.Trim(),
+        DisplayName = request.DisplayName.Trim(),
         PasswordHash = passwordHash,
         VerificationCode = code,
         ExpiresAt = DateTimeOffset.UtcNow.AddHours(24),
