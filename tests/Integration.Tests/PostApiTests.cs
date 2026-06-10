@@ -201,6 +201,67 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task SearchPosts_LikedByMe_is_false_before_liking()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"Post before like {unique}" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=10&offset=0", session.Token);
+        var results = await (await fx.Post.SendAsync(search)).Content.ReadFromJsonAsync<SearchResultsDto>();
+
+        Assert.Contains(results!.Posts, p => p.PostId == post!.PostId && !p.LikedByMe);
+    }
+
+    [Fact]
+    public async Task SearchPosts_LikedByMe_is_true_after_caller_likes_post()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reader = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = $"Liked search result {unique}" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        await fx.Engagement.SendAsync(fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post!.PostId}/likes", reader.Token));
+
+        await fx.Post.PostAsJsonAsync("/events/LikeAdded",
+            new { PostId = post.PostId, UserId = reader.UserId, OccurredAt = DateTimeOffset.UtcNow });
+
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=10&offset=0", reader.Token);
+        var results = await (await fx.Post.SendAsync(search)).Content.ReadFromJsonAsync<SearchResultsDto>();
+
+        var found = Assert.Single(results!.Posts, p => p.PostId == post.PostId);
+        Assert.True(found.LikedByMe);
+        Assert.Equal(1, found.LikeCount);
+    }
+
+    [Fact]
+    public async Task SearchPosts_LikedByMe_only_reflects_calling_user_not_other_likers()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var liker = await fx.RegisterAndLoginAsync();
+        var reader = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = $"Multi liker search {unique}" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        await fx.Post.PostAsJsonAsync("/events/LikeAdded",
+            new { PostId = post!.PostId, UserId = liker.UserId, OccurredAt = DateTimeOffset.UtcNow });
+
+        // reader has NOT liked the post, liker has
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=10&offset=0", reader.Token);
+        var results = await (await fx.Post.SendAsync(search)).Content.ReadFromJsonAsync<SearchResultsDto>();
+
+        var found = Assert.Single(results!.Posts, p => p.PostId == post.PostId);
+        Assert.False(found.LikedByMe);
+        Assert.Equal(1, found.LikeCount);
+    }
+
+    [Fact]
     public async Task CreatePost_with_hashtags_returns_extracted_hashtags()
     {
         var session = await fx.RegisterAndLoginAsync();
