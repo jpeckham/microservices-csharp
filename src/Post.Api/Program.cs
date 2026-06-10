@@ -169,6 +169,10 @@ app.MapPost("/api/posts/{postId:guid}/replies", async (
     };
 
     await posts.InsertOneAsync(post, cancellationToken: ct);
+    await posts.UpdateOneAsync(
+        p => p.Id == postId,
+        Builders<PostDocument>.Update.Inc(p => p.ReplyCount, 1),
+        cancellationToken: ct);
     await events.PublishAsync(new PostCreated(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, DateTimeOffset.UtcNow), ct);
     return Results.Created($"/api/posts/{post.Id}", ToDto(post));
 }).RequireAuthorization();
@@ -313,7 +317,7 @@ static string PrefixReplyContent(string parentAuthorHandle, string body)
 }
 
 static PostDto ToDto(PostDocument post) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId);
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId, post.ReplyCount);
 
 public sealed class PostDocument
 {
@@ -331,13 +335,14 @@ public sealed class PostDocument
     public Guid? OriginalPostId { get; set; }
     public List<string> Hashtags { get; set; } = [];
     public List<string> Mentions { get; set; } = [];
+    public int ReplyCount { get; set; }
     public DateTimeOffset PostedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
 public static class HashtagExtractor

@@ -580,6 +580,41 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task ReplyToPost_increments_parent_reply_count()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Post with replies" });
+        var parent = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(0, parent!.ReplyCount);
+
+        using var reply1Req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent.PostId}/replies", session.Token, new { content = "First reply" });
+        await fx.Post.SendAsync(reply1Req);
+
+        using var getReq1 = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{parent.PostId}", session.Token);
+        var afterFirst = await (await fx.Post.SendAsync(getReq1)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(1, afterFirst!.ReplyCount);
+
+        using var reply2Req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent.PostId}/replies", session.Token, new { content = "Second reply" });
+        await fx.Post.SendAsync(reply2Req);
+
+        using var getReq2 = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{parent.PostId}", session.Token);
+        var afterSecond = await (await fx.Post.SendAsync(getReq2)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(2, afterSecond!.ReplyCount);
+    }
+
+    [Fact]
+    public async Task NewPost_has_zero_reply_count()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Fresh post" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Equal(0, post!.ReplyCount);
+    }
+
+    [Fact]
     public async Task ReplyToPost_empty_content_returns_400()
     {
         var session = await fx.RegisterAndLoginAsync();
