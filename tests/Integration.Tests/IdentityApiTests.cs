@@ -212,6 +212,13 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
         return idx >= 0 ? emailBody[(idx + 7)..] : throw new InvalidOperationException("Token not found in email body.");
     }
 
+    private static string ExtractVerificationCode(string emailBody)
+    {
+        var prefix = "Your verification code is: ";
+        var idx = emailBody.IndexOf(prefix, StringComparison.Ordinal);
+        return idx >= 0 ? emailBody[(idx + prefix.Length)..].Trim() : throw new InvalidOperationException("Verification code not found in email body.");
+    }
+
     [Fact]
     public async Task HealthCheck_returns_healthy()
     {
@@ -460,4 +467,61 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     }
+
+    [Fact]
+    public async Task VerifyRegistration_with_code_with_spaces_succeeds()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var email = $"{id}@test.com";
+        var startResp = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email, password = "Pass123!", handle = id, displayName = id });
+        Assert.Equal(HttpStatusCode.Accepted, startResp.StatusCode);
+        var body = await startResp.Content.ReadFromJsonAsync<PendingRegistrationDto>();
+
+        var emails = await fx.GetDevEmailsAsync();
+        var code = ExtractVerificationCode(emails.First(m => m.To == email).Body);
+        var spacedCode = string.Join(" ", code.ToCharArray());
+
+        var verifyResp = await fx.Identity.PostAsJsonAsync("/api/registrations/verify",
+            new { pendingRegistrationId = body!.PendingRegistrationId, code = spacedCode });
+
+        Assert.Equal(HttpStatusCode.Created, verifyResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task VerifyRegistration_with_hyphenated_code_succeeds()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var email = $"{id}@test.com";
+        var startResp = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email, password = "Pass123!", handle = id, displayName = id });
+        Assert.Equal(HttpStatusCode.Accepted, startResp.StatusCode);
+        var body = await startResp.Content.ReadFromJsonAsync<PendingRegistrationDto>();
+
+        var emails = await fx.GetDevEmailsAsync();
+        var code = ExtractVerificationCode(emails.First(m => m.To == email).Body);
+        var hyphenatedCode = $"{code[..3]}-{code[3..]}";
+
+        var verifyResp = await fx.Identity.PostAsJsonAsync("/api/registrations/verify",
+            new { pendingRegistrationId = body!.PendingRegistrationId, code = hyphenatedCode });
+
+        Assert.Equal(HttpStatusCode.Created, verifyResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task VerifyRegistration_with_wrong_code_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var email = $"{id}@test.com";
+        var startResp = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email, password = "Pass123!", handle = id, displayName = id });
+        var body = await startResp.Content.ReadFromJsonAsync<PendingRegistrationDto>();
+
+        var verifyResp = await fx.Identity.PostAsJsonAsync("/api/registrations/verify",
+            new { pendingRegistrationId = body!.PendingRegistrationId, code = "000000" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, verifyResp.StatusCode);
+    }
 }
+
+file sealed record PendingRegistrationDto(Guid PendingRegistrationId);

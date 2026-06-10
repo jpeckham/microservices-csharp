@@ -330,7 +330,7 @@ app.MapPost("/api/registrations/verify", async (
     if (pending is null || pending.ExpiresAt < DateTimeOffset.UtcNow)
         return Results.BadRequest(new { error = "Registration not found or has expired." });
 
-    if (pending.VerificationCode != request.Code)
+    if (pending.VerificationCode != NormalizeCode(request.Code))
         return Results.BadRequest(new { error = "Invalid verification code." });
 
     var user = new UserDocument
@@ -404,6 +404,12 @@ static bool IsValidEmail(string email)
 {
     try { _ = new System.Net.Mail.MailAddress(email); return true; }
     catch { return false; }
+}
+
+static string NormalizeCode(string code)
+{
+    var digits = new string(code.Where(char.IsDigit).ToArray());
+    return digits.Length == 6 ? digits : code.Trim();
 }
 
 static UserProfileDto ToProfile(UserDocument user, Guid? requesterId, int followerCount, int followingCount) =>
