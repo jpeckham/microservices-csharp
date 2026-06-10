@@ -1,8 +1,5 @@
 @page "/posts/{PostId:guid}"
-@rendermode InteractiveServer
-@using Social.Web.Services
-@inject PostApi PostApi
-@inject EngagementApi EngagementApi
+@inject ApiClient Api
 
 <section class="workspace single-post-feed">
     @if (_post is null)
@@ -28,13 +25,13 @@
             }
         </article>
 
-        <section class="panel">
+        <section class="panel" style="margin-top:14px;">
             <h2>Comments</h2>
             <textarea @bind="_comment" placeholder="Add a comment"></textarea>
             <button @onclick="AddComment">Comment</button>
         </section>
 
-        <section class="feed">
+        <section class="feed" style="margin-top:14px;">
             @foreach (var comment in _comments)
             {
                 <article class="post">
@@ -54,31 +51,26 @@
     private string _editContent = "";
     private bool _editing;
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender) return;
-        await Load();
-        StateHasChanged();
-    }
+    protected override async Task OnInitializedAsync() => await Load();
 
     private async Task Load()
     {
-        _post = await PostApi.GetAsync(PostId);
+        _post = await Api.GetPostAsync(PostId);
         _editContent = _post?.Content ?? "";
-        _comments = await EngagementApi.CommentsAsync(PostId);
+        _comments = await Api.GetCommentsAsync(PostId);
     }
 
     private async Task AddComment()
     {
         if (string.IsNullOrWhiteSpace(_comment)) return;
-        await EngagementApi.CommentAsync(PostId, _comment);
+        await Api.CommentAsync(PostId, _comment);
         _comment = "";
         await Load();
     }
 
     private async Task SaveEdit()
     {
-        _post = await PostApi.EditAsync(PostId, _editContent);
+        _post = await Api.EditPostAsync(PostId, _editContent);
         _editing = false;
     }
 }

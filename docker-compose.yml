@@ -35,9 +35,11 @@ services:
       - "5101:8080"
     environment:
       ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: Development
       Mongo__ConnectionString: mongodb://mongo:27017
       Mongo__DatabaseName: IdentityDb
       Jwt__Key: "${JWT_KEY:-local-development-secret-change-me-32}"
+      PasswordReset__BaseUrl: http://localhost:32123
       ServiceBus__ConnectionString: "Endpoint=sb://servicebus-emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ServiceBus__TopicName: social-events
       Messaging__LocalEventSinkUrl: http://feed-api:8080/
@@ -133,21 +135,20 @@ services:
       servicebus-emulator:
         condition: service_started
 
-  social-web:
+  social-bff:
     build:
       context: .
-      dockerfile: src/Social.Web/Dockerfile
+      dockerfile: src/Social.Bff/Dockerfile
     ports:
       - "32123:8080"
-    volumes:
-      - social-web-keys:/app/data-protection-keys
     environment:
       ASPNETCORE_URLS: http://+:8080
       Services__Identity: http://identity-api:8080/
-      Services__Post: http://post-api:8080/
-      Services__Social: http://social-api:8080/
-      Services__Engagement: http://engagement-api:8080/
-      Services__Feed: http://feed-api:8080/
+      ReverseProxy__Clusters__identity__Destinations__d1__Address: http://identity-api:8080/
+      ReverseProxy__Clusters__post__Destinations__d1__Address: http://post-api:8080/
+      ReverseProxy__Clusters__social__Destinations__d1__Address: http://social-api:8080/
+      ReverseProxy__Clusters__engagement__Destinations__d1__Address: http://engagement-api:8080/
+      ReverseProxy__Clusters__feed__Destinations__d1__Address: http://feed-api:8080/
     depends_on:
       - identity-api
       - post-api
@@ -157,4 +158,3 @@ services:
 
 volumes:
   mongo-data:
-  social-web-keys:

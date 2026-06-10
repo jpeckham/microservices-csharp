@@ -5,11 +5,11 @@
       "name": "Run Everything (Docker Compose)",
       "type": "node-terminal",
       "request": "launch",
-      "command": "docker compose up --build",
+      "command": "docker compose up --build --remove-orphans",
       "cwd": "${workspaceFolder}",
       "postDebugTask": "docker-compose-down",
       "serverReadyAction": {
-        "pattern": "social-web.*Now listening on",
+        "pattern": "social-bff.*Now listening on",
         "uriFormat": "http://localhost:32123",
         "action": "openExternally"
       }

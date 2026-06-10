@@ -33,6 +33,9 @@
     <ProjectReference Include="..\..\src\Feed.Api\Feed.Api.csproj">
       <Aliases>FeedApi</Aliases>
     </ProjectReference>
+    <ProjectReference Include="..\..\src\Social.Web.Client\Social.Web.Client.csproj">
+      <Aliases>WebClient</Aliases>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,47 @@
+@inherits LayoutComponentBase
+@inject AppSession Session
+@inject ApiClient Api
+@inject NavigationManager Nav
+
+<div class="shell">
+    <nav class="top-nav">
+        <a class="brand" href="/">MicroSocial</a>
+        <a href="/">Feed</a>
+        <a href="/search">Search</a>
+        @if (Session.IsLoggedIn)
+        {
+            <a href="/profile/@Session.Handle!.TrimStart('@')">My profile</a>
+            <span class="nav-user">@Session.Handle</span>
+            <button class="secondary compact" @onclick="LogoutAsync">Log out</button>
+        }
+        else
+        {
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+        }
+    </nav>
+
+    <main>
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <span class="dismiss">&#x2715;</span>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.InitAsync();
+    }
+
+    private async Task LogoutAsync()
+    {
+        await Api.LogoutAsync();
+        Session.Clear();
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+}

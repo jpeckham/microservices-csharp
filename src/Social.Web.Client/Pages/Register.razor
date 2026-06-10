@@ -1,6 +1,6 @@
 @page "/register"
-@rendermode InteractiveServer
-@inject Social.Web.Services.AuthApi Auth
+@inject ApiClient Api
+@inject AppSession Session
 @inject NavigationManager Nav
 
 <section class="auth">
@@ -11,9 +11,9 @@
             <p>Create a profile and start posting.</p>
             <input @bind="_displayName" placeholder="Display name" />
             <input @bind="_handle" placeholder="Handle" />
-            <input @bind="_email" placeholder="Email" />
+            <input @bind="_email" placeholder="Email" type="email" />
             <input @bind="_password" placeholder="Password" type="password" />
-            <button @onclick="StartRegistrationAsync">Register</button>
+            <button disabled="@_busy" @onclick="StartRegistrationAsync">Register</button>
             @if (!string.IsNullOrWhiteSpace(_error))
             {
                 <p class="field-message">@_error</p>
@@ -25,7 +25,7 @@
             <h1>Check your email</h1>
             <p>We sent a 6-digit code to <strong>@_email</strong>. Enter it below to complete registration.</p>
             <input @bind="_verificationCode" placeholder="6-digit code" maxlength="6" inputmode="numeric" />
-            <button @onclick="VerifyAsync">Verify</button>
+            <button disabled="@_busy" @onclick="VerifyAsync">Verify</button>
             @if (!string.IsNullOrWhiteSpace(_error))
             {
                 <p class="field-message">@_error</p>
@@ -42,25 +42,28 @@
     private string _password = "";
     private string _verificationCode = "";
     private string? _error;
+    private bool _busy;
     private Guid? _pendingRegistrationId;
 
     private async Task StartRegistrationAsync()
     {
+        _busy = true;
         _error = null;
-        var (id, error) = await Auth.StartRegistrationAsync(_email, _password, _handle, _displayName);
-        if (error is not null)
-        {
-            _error = error;
-            return;
-        }
+        var (id, error) = await Api.StartRegistrationAsync(_email, _password, _handle, _displayName);
+        _busy = false;
+        if (error is not null) { _error = error; return; }
         _pendingRegistrationId = id;
     }
 
     private async Task VerifyAsync()
     {
+        _busy = true;
         _error = null;
-        _error = await Auth.VerifyRegistrationAsync(_pendingRegistrationId!.Value, _verificationCode);
-        if (_error is null) Nav.NavigateTo("/");
+        var (user, error) = await Api.VerifyRegistrationAsync(_pendingRegistrationId!.Value, _verificationCode);
+        _busy = false;
+        if (error is not null) { _error = error; return; }
+        Session.Apply(user!);
+        Nav.NavigateTo("/");
     }
 
     private void GoBack()

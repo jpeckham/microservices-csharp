@@ -1,9 +1,6 @@
 @page "/profile/{Handle}"
-@rendermode InteractiveServer
-@using Social.Web.Services
-@inject AuthApi Auth
-@inject FeedApi FeedApi
-@inject SocialApi SocialApi
+@inject ApiClient Api
+@inject AppSession Session
 
 <section class="workspace profile-page">
     @if (_profile is null)
@@ -66,34 +63,39 @@
     private FollowCountsDto _counts = new(0, 0);
     private string _displayName = "";
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override async Task OnInitializedAsync()
     {
-        if (!firstRender) return;
-        _profile = await Auth.GetProfileAsync(Handle);
+        await Session.InitAsync();
+        _profile = await Api.GetProfileAsync(Handle);
         if (_profile is not null)
         {
             _displayName = _profile.DisplayName;
-            _counts = await SocialApi.CountsAsync(_profile.UserId);
-            _posts = await FeedApi.ByUserAsync(_profile.UserId);
+            _counts = await Api.GetFollowCountsAsync(_profile.UserId);
+            _posts = await Api.GetUserFeedAsync(_profile.UserId);
         }
-        StateHasChanged();
     }
 
     private async Task SaveName()
     {
-        await Auth.UpdateDisplayNameAsync(_displayName);
-        _profile = await Auth.GetProfileAsync(Handle);
+        await Api.UpdateDisplayNameAsync(_displayName);
+        _profile = await Api.GetProfileAsync(Handle);
     }
 
     private async Task Follow()
     {
-        if (_profile is not null) await SocialApi.FollowAsync(_profile.UserId);
-        if (_profile is not null) _counts = await SocialApi.CountsAsync(_profile.UserId);
+        if (_profile is not null)
+        {
+            await Api.FollowAsync(_profile.UserId);
+            _counts = await Api.GetFollowCountsAsync(_profile.UserId);
+        }
     }
 
     private async Task Unfollow()
     {
-        if (_profile is not null) await SocialApi.UnfollowAsync(_profile.UserId);
-        if (_profile is not null) _counts = await SocialApi.CountsAsync(_profile.UserId);
+        if (_profile is not null)
+        {
+            await Api.UnfollowAsync(_profile.UserId);
+            _counts = await Api.GetFollowCountsAsync(_profile.UserId);
+        }
     }
 }
