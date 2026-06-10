@@ -294,6 +294,95 @@ public sealed class FeedApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task PostCreated_reply_does_not_add_separate_feed_entry()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var parentId = Guid.NewGuid();
+        var replyId = Guid.NewGuid();
+        var authorId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = parentId,
+            AuthorId = authorId,
+            AuthorHandle = "@parent",
+            AuthorDisplayName = "Parent Author",
+            Content = "Parent post",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = replyId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@replier",
+            AuthorDisplayName = "Replier",
+            Content = "Reply content",
+            OccurredAt = DateTimeOffset.UtcNow.AddSeconds(1),
+            ParentPostId = parentId
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        Assert.DoesNotContain(entries!, e => e.PostId == replyId);
+        Assert.Contains(entries!, e => e.PostId == parentId);
+    }
+
+    [Fact]
+    public async Task PostCreated_reply_bubbles_parent_to_top_of_feed()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var olderPostId = Guid.NewGuid();
+        var newerPostId = Guid.NewGuid();
+        var replyToOlderPostId = Guid.NewGuid();
+        var authorId = Guid.NewGuid();
+        var baseTime = DateTimeOffset.UtcNow;
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = olderPostId,
+            AuthorId = authorId,
+            AuthorHandle = "@older",
+            AuthorDisplayName = "Older Author",
+            Content = "Older post",
+            OccurredAt = baseTime
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = newerPostId,
+            AuthorId = authorId,
+            AuthorHandle = "@newer",
+            AuthorDisplayName = "Newer Author",
+            Content = "Newer post",
+            OccurredAt = baseTime.AddSeconds(1)
+        });
+
+        // Reply to older post — should bubble it to top
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = replyToOlderPostId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@replier",
+            AuthorDisplayName = "Replier",
+            Content = "Reply to old post",
+            OccurredAt = baseTime.AddSeconds(2),
+            ParentPostId = olderPostId
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var olderIdx = entries!.FindIndex(e => e.PostId == olderPostId);
+        var newerIdx = entries.FindIndex(e => e.PostId == newerPostId);
+
+        Assert.True(olderIdx < newerIdx, "Older post (with recent reply) should appear before newer post in feed");
+    }
+
+    [Fact]
     public async Task UserBlocked_event_stores_block_in_feed()
     {
         var blockerId = Guid.NewGuid();

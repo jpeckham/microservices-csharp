@@ -79,7 +79,7 @@ app.MapGet("/api/feed", async (
     }
 
     var result = await entries.Find(filter)
-        .SortByDescending(e => e.PostedAt)
+        .SortByDescending(e => e.LastActivityAt)
         .Skip(offset)
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
@@ -98,18 +98,29 @@ app.MapGet("/api/feed/users/{userId:guid}", async (Guid userId, int limit, int o
 
 app.MapPost("/events/PostCreated", async (PostCreated integrationEvent, IMongoCollection<FeedEntryDocument> entries, CancellationToken ct) =>
 {
-    var entry = new FeedEntryDocument
+    if (integrationEvent.ParentPostId.HasValue)
     {
-        Id = integrationEvent.PostId,
-        PostId = integrationEvent.PostId,
-        AuthorId = integrationEvent.AuthorId,
-        AuthorHandle = integrationEvent.AuthorHandle,
-        AuthorDisplayName = integrationEvent.AuthorDisplayName,
-        Content = integrationEvent.Content,
-        PostedAt = integrationEvent.OccurredAt,
-        UpdatedAt = integrationEvent.OccurredAt
-    };
-    await entries.ReplaceOneAsync(e => e.PostId == entry.PostId, entry, new ReplaceOptions { IsUpsert = true }, ct);
+        await entries.UpdateOneAsync(
+            e => e.PostId == integrationEvent.ParentPostId.Value && e.LastActivityAt < integrationEvent.OccurredAt,
+            Builders<FeedEntryDocument>.Update.Set(e => e.LastActivityAt, integrationEvent.OccurredAt),
+            cancellationToken: ct);
+    }
+    else
+    {
+        var entry = new FeedEntryDocument
+        {
+            Id = integrationEvent.PostId,
+            PostId = integrationEvent.PostId,
+            AuthorId = integrationEvent.AuthorId,
+            AuthorHandle = integrationEvent.AuthorHandle,
+            AuthorDisplayName = integrationEvent.AuthorDisplayName,
+            Content = integrationEvent.Content,
+            PostedAt = integrationEvent.OccurredAt,
+            UpdatedAt = integrationEvent.OccurredAt,
+            LastActivityAt = integrationEvent.OccurredAt
+        };
+        await entries.ReplaceOneAsync(e => e.PostId == entry.PostId, entry, new ReplaceOptions { IsUpsert = true }, ct);
+    }
     return Results.Accepted();
 });
 
@@ -222,6 +233,7 @@ public sealed class FeedEntryDocument
     public string Content { get; set; } = "";
     public DateTimeOffset PostedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset LastActivityAt { get; set; }
     public int LikeCount { get; set; }
     public int CommentCount { get; set; }
 }
@@ -397,18 +409,29 @@ public sealed class ServiceBusFeedConsumer(
 
     private async Task ApplyAsync(PostCreated integrationEvent, CancellationToken ct)
     {
-        var entry = new FeedEntryDocument
+        if (integrationEvent.ParentPostId.HasValue)
         {
-            Id = integrationEvent.PostId,
-            PostId = integrationEvent.PostId,
-            AuthorId = integrationEvent.AuthorId,
-            AuthorHandle = integrationEvent.AuthorHandle,
-            AuthorDisplayName = integrationEvent.AuthorDisplayName,
-            Content = integrationEvent.Content,
-            PostedAt = integrationEvent.OccurredAt,
-            UpdatedAt = integrationEvent.OccurredAt
-        };
-        await entries.ReplaceOneAsync(e => e.PostId == entry.PostId, entry, new ReplaceOptions { IsUpsert = true }, ct);
+            await entries.UpdateOneAsync(
+                e => e.PostId == integrationEvent.ParentPostId.Value && e.LastActivityAt < integrationEvent.OccurredAt,
+                Builders<FeedEntryDocument>.Update.Set(e => e.LastActivityAt, integrationEvent.OccurredAt),
+                cancellationToken: ct);
+        }
+        else
+        {
+            var entry = new FeedEntryDocument
+            {
+                Id = integrationEvent.PostId,
+                PostId = integrationEvent.PostId,
+                AuthorId = integrationEvent.AuthorId,
+                AuthorHandle = integrationEvent.AuthorHandle,
+                AuthorDisplayName = integrationEvent.AuthorDisplayName,
+                Content = integrationEvent.Content,
+                PostedAt = integrationEvent.OccurredAt,
+                UpdatedAt = integrationEvent.OccurredAt,
+                LastActivityAt = integrationEvent.OccurredAt
+            };
+            await entries.ReplaceOneAsync(e => e.PostId == entry.PostId, entry, new ReplaceOptions { IsUpsert = true }, ct);
+        }
     }
 
     private async Task ApplyAsync(PostUpdated integrationEvent, CancellationToken ct)

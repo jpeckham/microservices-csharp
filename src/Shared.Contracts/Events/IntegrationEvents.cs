@@ -32,7 +32,8 @@ public sealed record PostCreated(
     string AuthorHandle,
     string AuthorDisplayName,
     string Content,
-    DateTimeOffset OccurredAt)
+    DateTimeOffset OccurredAt,
+    Guid? ParentPostId = null)
     : IntegrationEvent(Guid.NewGuid(), OccurredAt)
 {
     public override string EventName => nameof(PostCreated);
