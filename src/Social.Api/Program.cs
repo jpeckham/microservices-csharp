@@ -111,6 +111,12 @@ app.MapGet("/api/users/{userId:guid}/counts", async (Guid userId, IMongoCollecti
     return Results.Ok(new FollowCountsDto((int)followers, (int)following));
 }).RequireAuthorization();
 
+app.MapGet("/api/users/{followerId:guid}/is-following/{targetId:guid}", async (Guid followerId, Guid targetId, IMongoCollection<FollowDocument> follows, CancellationToken ct) =>
+{
+    var isFollowing = await follows.Find(f => f.FollowerId == followerId && f.FollowingId == targetId).AnyAsync(ct);
+    return Results.Ok(new IsFollowingDto(isFollowing));
+}).RequireAuthorization();
+
 app.MapHealthChecks("/health");
 app.Run();
 
@@ -127,6 +133,7 @@ public sealed class FollowDocument
 }
 
 public sealed record FollowCountsDto(int FollowerCount, int FollowingCount);
+public sealed record IsFollowingDto(bool IsFollowing);
 
 public static class ClaimsPrincipalExtensions
 {
