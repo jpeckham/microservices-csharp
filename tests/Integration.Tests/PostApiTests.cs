@@ -49,13 +49,22 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task GetPost_without_auth_returns_401()
+    {
+        var response = await fx.Post.GetAsync($"/api/posts/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetPost_returns_post()
     {
         var session = await fx.RegisterAndLoginAsync();
         using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Fetch me" });
         var created = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
 
-        var response = await fx.Post.GetAsync($"/api/posts/{created!.PostId}");
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created!.PostId}", session.Token);
+        var response = await fx.Post.SendAsync(get);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var fetched = await response.Content.ReadFromJsonAsync<PostDto>();
@@ -65,7 +74,9 @@ public sealed class PostApiTests(IntegrationFixture fx)
     [Fact]
     public async Task GetPost_unknown_id_returns_404()
     {
-        var response = await fx.Post.GetAsync($"/api/posts/{Guid.NewGuid()}");
+        var session = await fx.RegisterAndLoginAsync();
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{Guid.NewGuid()}", session.Token);
+        var response = await fx.Post.SendAsync(get);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -96,7 +107,8 @@ public sealed class PostApiTests(IntegrationFixture fx)
         var deleteResp = await fx.Post.SendAsync(delete);
         Assert.Equal(HttpStatusCode.NoContent, deleteResp.StatusCode);
 
-        var getResp = await fx.Post.GetAsync($"/api/posts/{post.PostId}");
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post.PostId}", session.Token);
+        var getResp = await fx.Post.SendAsync(getReq);
         Assert.Equal(HttpStatusCode.NotFound, getResp.StatusCode);
     }
 
@@ -234,7 +246,8 @@ public sealed class PostApiTests(IntegrationFixture fx)
         using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Check out #xunit for testing!" });
         var created = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
 
-        var response = await fx.Post.GetAsync($"/api/posts/{created!.PostId}");
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created!.PostId}", session.Token);
+        var response = await fx.Post.SendAsync(get);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var fetched = await response.Content.ReadFromJsonAsync<PostDto>();
@@ -309,7 +322,8 @@ public sealed class PostApiTests(IntegrationFixture fx)
         using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Shoutout to @frank today!" });
         var created = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
 
-        var response = await fx.Post.GetAsync($"/api/posts/{created!.PostId}");
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{created!.PostId}", session.Token);
+        var response = await fx.Post.SendAsync(get);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var fetched = await response.Content.ReadFromJsonAsync<PostDto>();
