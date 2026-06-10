@@ -412,4 +412,52 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Register_with_display_name_over_50_chars_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var longName = new string('A', 51);
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = id, displayName = longName });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_with_display_name_over_50_chars_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var longName = new string('B', 51);
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = id, displayName = longName });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateDisplayName_over_50_chars_returns_400()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var longName = new string('C', 51);
+        using var request = fx.AuthorizedRequest(HttpMethod.Put, "/api/users/me/display-name", session.Token,
+            new { displayName = longName });
+
+        var response = await fx.Identity.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateDisplayName_exactly_50_chars_returns_204()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var maxName = new string('D', 50);
+        using var request = fx.AuthorizedRequest(HttpMethod.Put, "/api/users/me/display-name", session.Token,
+            new { displayName = maxName });
+
+        var response = await fx.Identity.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
 }

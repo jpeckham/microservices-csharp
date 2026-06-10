@@ -82,6 +82,9 @@ app.MapPost("/api/users/register", async (
     if (!IsValidHandle(request.Handle))
         return Results.BadRequest(new { error = "Handle must contain only letters, digits, and underscores." });
 
+    if (!string.IsNullOrWhiteSpace(request.DisplayName) && request.DisplayName.Trim().Length > 50)
+        return Results.BadRequest(new { error = "Display name must be 50 characters or fewer." });
+
     var handle = NormalizeHandle(request.Handle);
     var existing = await users.Find(u => u.Email == request.Email || u.Handle == handle).AnyAsync(ct);
     if (existing)
@@ -175,6 +178,7 @@ app.MapPut("/api/users/me/display-name", async (
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(request.DisplayName)) return Results.BadRequest(new { error = "Display name is required." });
+    if (request.DisplayName.Trim().Length > 50) return Results.BadRequest(new { error = "Display name must be 50 characters or fewer." });
 
     var update = Builders<UserDocument>.Update.Set(u => u.DisplayName, request.DisplayName.Trim());
     var user = await users.FindOneAndUpdateAsync(
@@ -273,6 +277,9 @@ app.MapPost("/api/registrations", async (
 
     if (!IsValidHandle(request.Handle))
         return Results.BadRequest(new { error = "Handle must contain only letters, digits, and underscores." });
+
+    if (!string.IsNullOrWhiteSpace(request.DisplayName) && request.DisplayName.Trim().Length > 50)
+        return Results.BadRequest(new { error = "Display name must be 50 characters or fewer." });
 
     var email = request.Email.Trim().ToLowerInvariant();
     var handle = NormalizeHandle(request.Handle);
