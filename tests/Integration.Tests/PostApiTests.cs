@@ -916,6 +916,99 @@ public sealed class PostApiTests(IntegrationFixture fx)
         var after = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
         Assert.Equal(0, after!.RepostCount);
     }
+
+    [Fact]
+    public async Task DeletePost_soft_deletes_so_GET_returns_404()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "To be soft-deleted" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var delete = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{post!.PostId}", session.Token);
+        var deleteResp = await fx.Post.SendAsync(delete);
+        Assert.Equal(HttpStatusCode.NoContent, deleteResp.StatusCode);
+
+        using var get = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post.PostId}", session.Token);
+        var getResp = await fx.Post.SendAsync(get);
+        Assert.Equal(HttpStatusCode.NotFound, getResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeletedPost_does_not_appear_in_recent_posts()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"Post to delete {unique}" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var delete = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{post!.PostId}", session.Token);
+        await fx.Post.SendAsync(delete);
+
+        using var recent = fx.AuthorizedRequest(HttpMethod.Get, "/api/posts/recent?limit=100", session.Token);
+        var posts = await (await fx.Post.SendAsync(recent)).Content.ReadFromJsonAsync<List<PostDto>>();
+
+        Assert.DoesNotContain(posts!, p => p.PostId == post.PostId);
+    }
+
+    [Fact]
+    public async Task DeletedPost_does_not_appear_in_search_results()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = $"Deleted searchable post {unique}" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var delete = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{post!.PostId}", session.Token);
+        await fx.Post.SendAsync(delete);
+
+        using var search = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/search?q={unique}&limit=50&offset=0", session.Token);
+        var results = await (await fx.Post.SendAsync(search)).Content.ReadFromJsonAsync<SearchResultsDto>();
+
+        Assert.DoesNotContain(results!.Posts, p => p.PostId == post.PostId);
+    }
+
+    [Fact]
+    public async Task ReplyToDeletedPost_returns_404()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Will be deleted" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var delete = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{post!.PostId}", session.Token);
+        await fx.Post.SendAsync(delete);
+
+        using var reply = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post.PostId}/replies", session.Token, new { content = "Reply to deleted post" });
+        var response = await fx.Post.SendAsync(reply);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeletedReply_does_not_appear_in_reply_list()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "Parent post" });
+        var parent = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var r1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent!.PostId}/replies", session.Token, new { content = "Kept reply" });
+        var kept = await (await fx.Post.SendAsync(r1)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var r2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{parent.PostId}/replies", session.Token, new { content = "Deleted reply" });
+        var toDelete = await (await fx.Post.SendAsync(r2)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var delete = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{toDelete!.PostId}", session.Token);
+        await fx.Post.SendAsync(delete);
+
+        using var list = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{parent.PostId}/replies", session.Token);
+        var replies = await (await fx.Post.SendAsync(list)).Content.ReadFromJsonAsync<List<PostDto>>();
+
+        Assert.Contains(replies!, r => r.PostId == kept!.PostId);
+        Assert.DoesNotContain(replies!, r => r.PostId == toDelete.PostId);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);

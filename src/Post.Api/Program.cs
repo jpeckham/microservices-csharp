@@ -95,7 +95,7 @@ app.MapPut("/api/posts/{id:guid}", async (
     if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 280)
         return Results.BadRequest(new { error = "Post content must be between 1 and 280 characters." });
 
-    var existing = await posts.Find(p => p.Id == id).FirstOrDefaultAsync(ct);
+    var existing = await posts.Find(p => p.Id == id && !p.IsDeleted).FirstOrDefaultAsync(ct);
     if (existing is null) return Results.NotFound(new { error = "Post not found." });
     if (existing.AuthorId != userId) return Results.Forbid();
 
@@ -126,14 +126,13 @@ app.MapDelete("/api/posts/{id:guid}", async (
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
 
-    var toDelete = await posts.Find(p => p.Id == id).FirstOrDefaultAsync(ct);
+    var toDelete = await posts.Find(p => p.Id == id && !p.IsDeleted).FirstOrDefaultAsync(ct);
     if (toDelete is null) return Results.NotFound(new { error = "Post not found." });
     if (toDelete.AuthorId != userId) return Results.Forbid();
 
-    var post = await posts.FindOneAndDeleteAsync(p => p.Id == id, cancellationToken: ct);
-    if (post is null) return Results.NotFound(new { error = "Post not found." });
-
-    await events.PublishAsync(new PostDeleted(post.Id, post.AuthorId, DateTimeOffset.UtcNow), ct);
+    await posts.UpdateOneAsync(p => p.Id == id,
+        Builders<PostDocument>.Update.Set(p => p.IsDeleted, true), cancellationToken: ct);
+    await events.PublishAsync(new PostDeleted(toDelete.Id, toDelete.AuthorId, DateTimeOffset.UtcNow), ct);
     return Results.NoContent();
 }).RequireAuthorization();
 
@@ -150,7 +149,7 @@ app.MapPost("/api/posts/{postId:guid}/replies", async (
     if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 280)
         return Results.BadRequest(new { error = "Post content must be between 1 and 280 characters." });
 
-    var parent = await posts.Find(p => p.Id == postId).FirstOrDefaultAsync(ct);
+    var parent = await posts.Find(p => p.Id == postId && !p.IsDeleted).FirstOrDefaultAsync(ct);
     if (parent is null) return Results.NotFound(new { error = "Parent post not found." });
 
     var content = PrefixReplyContent(parent.AuthorHandle, request.Content.Trim());
@@ -179,7 +178,7 @@ app.MapPost("/api/posts/{postId:guid}/replies", async (
 
 app.MapGet("/api/posts/{id:guid}", async (Guid id, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
-    var post = await posts.Find(p => p.Id == id).FirstOrDefaultAsync(ct);
+    var post = await posts.Find(p => p.Id == id && !p.IsDeleted).FirstOrDefaultAsync(ct);
     return post is null ? Results.NotFound(new { error = "Post not found." }) : Results.Ok(ToDto(post));
 }).RequireAuthorization();
 
@@ -187,7 +186,7 @@ app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, i
 {
     var take = Math.Clamp(limit ?? 20, 1, 100);
     var skip = Math.Max(offset ?? 0, 0);
-    var result = await posts.Find(p => p.ParentPostId == postId)
+    var result = await posts.Find(p => p.ParentPostId == postId && !p.IsDeleted)
         .SortBy(p => p.PostedAt)
         .Skip(skip)
         .Limit(take)
@@ -208,20 +207,20 @@ app.MapPost("/api/posts/{postId:guid}/reposts", async (
     if (request.Content.Length > 280)
         return Results.BadRequest(new { error = "Post content must be 280 characters or fewer." });
 
-    var target = await posts.Find(p => p.Id == postId).FirstOrDefaultAsync(ct);
+    var target = await posts.Find(p => p.Id == postId && !p.IsDeleted).FirstOrDefaultAsync(ct);
     if (target is null) return Results.NotFound(new { error = "Post not found." });
 
     // Resolve to the root original post (no repost chains deeper than one)
     var rootId = target.OriginalPostId ?? target.Id;
     var root = target.OriginalPostId.HasValue
-        ? await posts.Find(p => p.Id == rootId).FirstOrDefaultAsync(ct)
+        ? await posts.Find(p => p.Id == rootId && !p.IsDeleted).FirstOrDefaultAsync(ct)
         : target;
     if (root is null) return Results.NotFound(new { error = "Original post not found." });
 
     if (root.AuthorId == userId)
         return Results.Conflict(new { error = "Users cannot repost their own posts." });
 
-    var existingRepost = await posts.Find(p => p.OriginalPostId == rootId && p.AuthorId == userId).FirstOrDefaultAsync(ct);
+    var existingRepost = await posts.Find(p => p.OriginalPostId == rootId && p.AuthorId == userId && !p.IsDeleted).FirstOrDefaultAsync(ct);
     if (existingRepost is not null)
         return Results.Conflict(new { error = "Users can repost a post only once." });
 
@@ -259,14 +258,15 @@ app.MapDelete("/api/posts/{postId:guid}/reposts/mine", async (
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
 
-    var target = await posts.Find(p => p.Id == postId).FirstOrDefaultAsync(ct);
+    var target = await posts.Find(p => p.Id == postId && !p.IsDeleted).FirstOrDefaultAsync(ct);
     if (target is null) return Results.NotFound(new { error = "Post not found." });
 
     var rootId = target.OriginalPostId ?? target.Id;
-    var myRepost = await posts.Find(p => p.OriginalPostId == rootId && p.AuthorId == userId).FirstOrDefaultAsync(ct);
+    var myRepost = await posts.Find(p => p.OriginalPostId == rootId && p.AuthorId == userId && !p.IsDeleted).FirstOrDefaultAsync(ct);
     if (myRepost is null) return Results.NotFound(new { error = "You have not reposted this post." });
 
-    await posts.DeleteOneAsync(p => p.Id == myRepost.Id, ct);
+    await posts.UpdateOneAsync(p => p.Id == myRepost.Id,
+        Builders<PostDocument>.Update.Set(p => p.IsDeleted, true), cancellationToken: ct);
     await posts.UpdateOneAsync(
         p => p.Id == rootId && p.RepostCount > 0,
         Builders<PostDocument>.Update.Inc(p => p.RepostCount, -1),
@@ -277,7 +277,7 @@ app.MapDelete("/api/posts/{postId:guid}/reposts/mine", async (
 
 app.MapGet("/api/posts/by-user/{userId:guid}", async (Guid userId, int limit, int offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
-    var result = await posts.Find(p => p.AuthorId == userId)
+    var result = await posts.Find(p => p.AuthorId == userId && !p.IsDeleted)
         .SortByDescending(p => p.PostedAt)
         .Skip(offset)
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
@@ -294,10 +294,12 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
     var regex = new MongoDB.Bson.BsonRegularExpression(escaped, "i");
     var contentFilter = Builders<PostDocument>.Filter.Regex(p => p.Content, regex);
     var rootOnlyFilter = Builders<PostDocument>.Filter.Eq(p => p.ParentPostId, (Guid?)null);
+    var notDeletedFilter = Builders<PostDocument>.Filter.Eq(p => p.IsDeleted, false);
 
     // Phase 1: IDs of original posts (not reposts) whose content matches
     var matchingOriginalIds = await posts
         .Find(Builders<PostDocument>.Filter.And(
+            notDeletedFilter,
             rootOnlyFilter,
             Builders<PostDocument>.Filter.Eq(p => p.OriginalPostId, (Guid?)null),
             contentFilter))
@@ -312,12 +314,13 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
             p => p.OriginalPostId,
             matchingOriginalIds.Select(id => (Guid?)id));
         combinedFilter = Builders<PostDocument>.Filter.And(
+            notDeletedFilter,
             rootOnlyFilter,
             Builders<PostDocument>.Filter.Or(contentFilter, repostOfMatchFilter));
     }
     else
     {
-        combinedFilter = Builders<PostDocument>.Filter.And(rootOnlyFilter, contentFilter);
+        combinedFilter = Builders<PostDocument>.Filter.And(notDeletedFilter, rootOnlyFilter, contentFilter);
     }
 
     var result = await posts.Find(combinedFilter)
@@ -331,7 +334,7 @@ app.MapGet("/api/posts/search", async (string? q, int limit, int offset, IMongoC
 app.MapGet("/api/posts/recent", async (int? limit, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
 {
     var take = Math.Clamp(limit ?? 20, 1, 100);
-    var result = await posts.Find(p => p.ParentPostId == null)
+    var result = await posts.Find(p => p.ParentPostId == null && !p.IsDeleted)
         .SortByDescending(p => p.PostedAt)
         .Limit(take)
         .ToListAsync(ct);
@@ -373,6 +376,7 @@ public sealed class PostDocument
     public List<string> Mentions { get; set; } = [];
     public int ReplyCount { get; set; }
     public int RepostCount { get; set; }
+    public bool IsDeleted { get; set; }
     public DateTimeOffset PostedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }
