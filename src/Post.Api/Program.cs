@@ -207,7 +207,13 @@ app.MapGet("/api/posts/{id:guid}", async (Guid id, ClaimsPrincipal principal, IM
         var parent = await posts.Find(p => p.Id == post.ParentPostId.Value && !p.IsDeleted).FirstOrDefaultAsync(ct);
         if (parent is not null) replyTarget = ToQuotedDto(parent);
     }
-    return Results.Ok(ToDto(post, repostedByMe, quotedPost, replyTarget));
+    var rawReplies = await posts.Find(p => p.ParentPostId == id && !p.IsDeleted)
+        .SortByDescending(p => p.PostedAt)
+        .Limit(3)
+        .ToListAsync(ct);
+    var currentAsQuoted = ToQuotedDto(post);
+    var recentReplies = rawReplies.Select(r => ToDto(r, replyTarget: currentAsQuoted)).ToList();
+    return Results.Ok(ToDto(post, repostedByMe, quotedPost, replyTarget, recentReplies));
 }).RequireAuthorization();
 
 app.MapGet("/api/posts/{postId:guid}/replies", async (Guid postId, int? limit, int? offset, IMongoCollection<PostDocument> posts, CancellationToken ct) =>
@@ -392,8 +398,8 @@ static string PrefixReplyContent(string parentAuthorHandle, string body)
     return $"{prefix} {body}";
 }
 
-static PostDto ToDto(PostDocument post, bool repostedByMe = false, QuotedPostDto? quotedPost = null, QuotedPostDto? replyTarget = null) =>
-    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, repostedByMe, quotedPost, replyTarget);
+static PostDto ToDto(PostDocument post, bool repostedByMe = false, QuotedPostDto? quotedPost = null, QuotedPostDto? replyTarget = null, List<PostDto>? recentReplies = null) =>
+    new(post.Id, post.AuthorId, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt, post.UpdatedAt, post.Hashtags, post.Mentions, post.ParentPostId, post.OriginalPostId, post.ReplyCount, post.RepostCount, repostedByMe, quotedPost, replyTarget, recentReplies);
 
 static QuotedPostDto ToQuotedDto(PostDocument post) =>
     new(post.Id, post.AuthorHandle, post.AuthorDisplayName, post.Content, post.PostedAt);
@@ -440,7 +446,7 @@ public sealed class PostDocument
 public sealed record CreatePostRequest(string Content);
 public sealed record UpdatePostRequest(string Content);
 public sealed record QuotedPostDto(Guid PostId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt);
-public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null);
+public sealed record PostDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, DateTimeOffset UpdatedAt, List<string> Hashtags, List<string> Mentions, Guid? ParentPostId = null, Guid? OriginalPostId = null, int ReplyCount = 0, int RepostCount = 0, bool RepostedByMe = false, QuotedPostDto? QuotedPost = null, QuotedPostDto? ReplyTarget = null, List<PostDto>? RecentReplies = null);
 public sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
 
 public static class HashtagExtractor

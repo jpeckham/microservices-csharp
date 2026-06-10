@@ -1328,6 +1328,134 @@ public sealed class PostApiTests(IntegrationFixture fx)
 
         Assert.Null(fetched!.ReplyTarget);
     }
+
+    [Fact]
+    public async Task GetPost_with_no_replies_has_empty_recent_replies()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", session.Token, new { content = "No replies yet" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post!.PostId}", session.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.NotNull(fetched!.RecentReplies);
+        Assert.Empty(fetched.RecentReplies!);
+    }
+
+    [Fact]
+    public async Task GetPost_returns_recent_replies_embedded_in_response()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post with replies" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var r1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post!.PostId}/replies", replier.Token, new { content = "First reply" });
+        using var r2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post.PostId}/replies", replier.Token, new { content = "Second reply" });
+        await fx.Post.SendAsync(r1);
+        await fx.Post.SendAsync(r2);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post.PostId}", author.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.NotNull(fetched!.RecentReplies);
+        Assert.Equal(2, fetched.RecentReplies!.Count);
+        Assert.All(fetched.RecentReplies, r => Assert.Equal(post.PostId, r.ParentPostId));
+    }
+
+    [Fact]
+    public async Task GetPost_recent_replies_capped_at_3()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post with many replies" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        for (var i = 1; i <= 5; i++)
+        {
+            using var r = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post!.PostId}/replies", replier.Token, new { content = $"Reply {i}" });
+            await fx.Post.SendAsync(r);
+        }
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post!.PostId}", author.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.NotNull(fetched!.RecentReplies);
+        Assert.Equal(3, fetched.RecentReplies!.Count);
+    }
+
+    [Fact]
+    public async Task GetPost_recent_replies_are_ordered_newest_first()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post to reply to" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var r1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post!.PostId}/replies", replier.Token, new { content = "Older reply" });
+        using var r2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post.PostId}/replies", replier.Token, new { content = "Newer reply" });
+        await fx.Post.SendAsync(r1);
+        await fx.Post.SendAsync(r2);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post.PostId}", author.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.NotNull(fetched!.RecentReplies);
+        Assert.Equal(2, fetched.RecentReplies!.Count);
+        Assert.True(fetched.RecentReplies[0].PostedAt >= fetched.RecentReplies[1].PostedAt,
+            "Replies should be ordered newest first.");
+    }
+
+    [Fact]
+    public async Task GetPost_recent_replies_each_have_reply_target_pointing_to_current_post()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Parent post" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var replyReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post!.PostId}/replies", replier.Token, new { content = "Reply with target" });
+        await fx.Post.SendAsync(replyReq);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post.PostId}", author.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        var embeddedReply = fetched!.RecentReplies!.Single();
+        Assert.NotNull(embeddedReply.ReplyTarget);
+        Assert.Equal(post.PostId, embeddedReply.ReplyTarget!.PostId);
+        Assert.Equal("Parent post", embeddedReply.ReplyTarget.Content);
+    }
+
+    [Fact]
+    public async Task GetPost_deleted_reply_not_included_in_recent_replies()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post with a deleted reply" });
+        var post = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var keepReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post!.PostId}/replies", replier.Token, new { content = "Kept reply" });
+        var kept = await (await fx.Post.SendAsync(keepReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var delReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{post.PostId}/replies", replier.Token, new { content = "Deleted reply" });
+        var toDelete = await (await fx.Post.SendAsync(delReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{toDelete!.PostId}", replier.Token);
+        await fx.Post.SendAsync(deleteReq);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{post.PostId}", author.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        Assert.Contains(fetched!.RecentReplies!, r => r.PostId == kept!.PostId);
+        Assert.DoesNotContain(fetched.RecentReplies!, r => r.PostId == toDelete.PostId);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
