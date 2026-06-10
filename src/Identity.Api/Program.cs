@@ -76,6 +76,9 @@ app.MapPost("/api/users/register", async (
     if (request.Password.Length < 8 || !request.Password.Any(char.IsDigit))
         return Results.BadRequest(new { error = "Password must be at least 8 characters and contain at least one digit." });
 
+    if (!IsValidHandle(request.Handle))
+        return Results.BadRequest(new { error = "Handle must contain only letters, digits, and underscores." });
+
     var handle = NormalizeHandle(request.Handle);
     var existing = await users.Find(u => u.Email == request.Email || u.Handle == handle).AnyAsync(ct);
     if (existing)
@@ -262,6 +265,9 @@ app.MapPost("/api/registrations", async (
     if (request.Password.Length < 8 || !request.Password.Any(char.IsDigit))
         return Results.BadRequest(new { error = "Password must be at least 8 characters and contain at least one digit." });
 
+    if (!IsValidHandle(request.Handle))
+        return Results.BadRequest(new { error = "Handle must contain only letters, digits, and underscores." });
+
     var email = request.Email.Trim().ToLowerInvariant();
     var handle = NormalizeHandle(request.Handle);
 
@@ -373,6 +379,12 @@ static string NormalizeHandle(string handle)
 {
     var normalized = handle.Trim().TrimStart('@').ToLowerInvariant();
     return $"@{normalized}";
+}
+
+static bool IsValidHandle(string handle)
+{
+    var raw = handle.Trim().TrimStart('@');
+    return raw.Length > 0 && raw.All(c => char.IsLetterOrDigit(c) || c == '_');
 }
 
 static UserProfileDto ToProfile(UserDocument user, Guid? requesterId, int followerCount, int followingCount) =>

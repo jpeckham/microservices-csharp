@@ -332,4 +332,44 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Register_with_handle_containing_spaces_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = "hello world", displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_with_handle_containing_special_chars_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/users/register",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = "bad-handle!", displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_with_handle_containing_spaces_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = "bad handle", displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task StartRegistration_with_handle_containing_special_chars_returns_400()
+    {
+        var id = Guid.NewGuid().ToString("N")[..10];
+        var response = await fx.Identity.PostAsJsonAsync("/api/registrations",
+            new { email = $"{id}@test.com", password = "Pass123!", handle = "bad@handle#", displayName = id });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }
