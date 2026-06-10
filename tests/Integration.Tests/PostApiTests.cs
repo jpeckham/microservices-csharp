@@ -1597,6 +1597,62 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task GetPost_reply_has_nested_recent_replies_for_its_own_replies()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var rootReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Root post" });
+        var root = await (await fx.Post.SendAsync(rootReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var level1Req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{root!.PostId}/replies", replier.Token, new { content = "Level 1 reply" });
+        var level1 = await (await fx.Post.SendAsync(level1Req)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var level2Req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{level1!.PostId}/replies", author.Token, new { content = "Level 2 reply" });
+        var level2 = await (await fx.Post.SendAsync(level2Req)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{root.PostId}", author.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        var embeddedLevel1 = Assert.Single(fetched!.RecentReplies!, r => r.PostId == level1.PostId);
+        Assert.NotNull(embeddedLevel1.RecentReplies);
+        var embeddedLevel2 = Assert.Single(embeddedLevel1.RecentReplies!, r => r.PostId == level2!.PostId);
+        Assert.NotNull(embeddedLevel2.RecentReplies);
+        Assert.Empty(embeddedLevel2.RecentReplies!);
+    }
+
+    [Fact]
+    public async Task GetPost_conversation_tree_limited_to_depth_three_from_selected_post()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var replier = await fx.RegisterAndLoginAsync();
+
+        using var rootReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Root" });
+        var root = await (await fx.Post.SendAsync(rootReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var l1Req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{root!.PostId}/replies", replier.Token, new { content = "Level 1" });
+        var level1 = await (await fx.Post.SendAsync(l1Req)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var l2Req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{level1!.PostId}/replies", author.Token, new { content = "Level 2" });
+        var level2 = await (await fx.Post.SendAsync(l2Req)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var l3Req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{level2!.PostId}/replies", replier.Token, new { content = "Level 3" });
+        var level3 = await (await fx.Post.SendAsync(l3Req)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var l4Req = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{level3!.PostId}/replies", author.Token, new { content = "Level 4 — should not appear" });
+        await fx.Post.SendAsync(l4Req);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{root.PostId}", author.Token);
+        var fetched = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        var l1Embedded = Assert.Single(fetched!.RecentReplies!, r => r.PostId == level1.PostId);
+        var l2Embedded = Assert.Single(l1Embedded.RecentReplies!, r => r.PostId == level2.PostId);
+        var l3Embedded = Assert.Single(l2Embedded.RecentReplies!, r => r.PostId == level3.PostId);
+        // Level 3 should have empty RecentReplies (depth limit)
+        Assert.True(l3Embedded.RecentReplies is null || l3Embedded.RecentReplies.Count == 0);
+    }
+
+    [Fact]
     public async Task CreatePost_plain_text_has_single_segment_with_no_mention_or_hashtag()
     {
         var session = await fx.RegisterAndLoginAsync();

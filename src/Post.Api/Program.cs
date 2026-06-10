@@ -209,12 +209,38 @@ app.MapGet("/api/posts/{id:guid}", async (Guid id, ClaimsPrincipal principal, IM
         var parent = await posts.Find(p => p.Id == post.ParentPostId.Value && !p.IsDeleted).FirstOrDefaultAsync(ct);
         if (parent is not null) replyTarget = ToQuotedDto(parent);
     }
-    var rawReplies = await posts.Find(p => p.ParentPostId == id && !p.IsDeleted)
+    var level1 = await posts.Find(p => p.ParentPostId == id && !p.IsDeleted)
         .SortByDescending(p => p.PostedAt)
         .Limit(3)
         .ToListAsync(ct);
+
+    var level1Ids = level1.Select(r => (Guid?)r.Id).ToList();
+    var level2All = level1Ids.Count > 0
+        ? await posts.Find(p => level1Ids.Contains(p.ParentPostId) && !p.IsDeleted)
+            .SortByDescending(p => p.PostedAt)
+            .ToListAsync(ct)
+        : [];
+
+    var level2Ids = level2All.Select(r => (Guid?)r.Id).ToList();
+    var level3All = level2Ids.Count > 0
+        ? await posts.Find(p => level2Ids.Contains(p.ParentPostId) && !p.IsDeleted)
+            .SortByDescending(p => p.PostedAt)
+            .ToListAsync(ct)
+        : [];
+
+    var level3ByParent = level3All
+        .GroupBy(p => p.ParentPostId!.Value)
+        .ToDictionary(g => g.Key, g => g.Take(3).Select(r => ToDto(r, recentReplies: [])).ToList());
+
+    var level2ByParent = level2All
+        .GroupBy(p => p.ParentPostId!.Value)
+        .ToDictionary(g => g.Key, g => g.Take(3)
+            .Select(r => ToDto(r, recentReplies: level3ByParent.TryGetValue(r.Id, out var l3) ? l3 : [])).ToList());
+
     var currentAsQuoted = ToQuotedDto(post);
-    var recentReplies = rawReplies.Select(r => ToDto(r, replyTarget: currentAsQuoted)).ToList();
+    var recentReplies = level1.Select(r => ToDto(r, replyTarget: currentAsQuoted,
+        recentReplies: level2ByParent.TryGetValue(r.Id, out var l2) ? l2 : null)).ToList();
+
     return Results.Ok(ToDto(post, repostedByMe, likedByMe, quotedPost, replyTarget, recentReplies));
 }).RequireAuthorization();
 
