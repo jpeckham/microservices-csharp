@@ -167,6 +167,58 @@ public sealed class EngagementApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task DeleteComment_author_returns_204()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{postId}/comments", session.Token, new { content = "To delete" });
+        var createResp = await fx.Engagement.SendAsync(createReq);
+        var comment = await createResp.Content.ReadFromJsonAsync<CommentDto>();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{postId}/comments/{comment!.CommentId}", session.Token);
+        var deleteResp = await fx.Engagement.SendAsync(deleteReq);
+
+        Assert.Equal(HttpStatusCode.NoContent, deleteResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteComment_wrong_author_returns_403()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var otherUser = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{postId}/comments", author.Token, new { content = "Not yours" });
+        var createResp = await fx.Engagement.SendAsync(createReq);
+        var comment = await createResp.Content.ReadFromJsonAsync<CommentDto>();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{postId}/comments/{comment!.CommentId}", otherUser.Token);
+        var deleteResp = await fx.Engagement.SendAsync(deleteReq);
+
+        Assert.Equal(HttpStatusCode.Forbidden, deleteResp.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteComment_not_found_returns_404()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{Guid.NewGuid()}/comments/{Guid.NewGuid()}", session.Token);
+        var response = await fx.Engagement.SendAsync(deleteReq);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteComment_without_auth_returns_401()
+    {
+        var response = await fx.Engagement.DeleteAsync($"/api/posts/{Guid.NewGuid()}/comments/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task HealthCheck_returns_healthy()
     {
         var response = await fx.Engagement.GetAsync("/health");

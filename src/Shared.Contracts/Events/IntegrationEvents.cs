@@ -109,3 +109,13 @@ public sealed record CommentAdded(
 {
     public override string EventName => nameof(CommentAdded);
 }
+
+public sealed record CommentDeleted(
+    Guid CommentId,
+    Guid PostId,
+    Guid AuthorId,
+    DateTimeOffset OccurredAt)
+    : IntegrationEvent(Guid.NewGuid(), OccurredAt)
+{
+    public override string EventName => nameof(CommentDeleted);
+}

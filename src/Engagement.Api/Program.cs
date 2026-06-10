@@ -128,6 +128,26 @@ app.MapGet("/api/posts/{postId:guid}/comments", async (Guid postId, IMongoCollec
     return Results.Ok(result.Select(ToDto));
 }).RequireAuthorization();
 
+app.MapDelete("/api/posts/{postId:guid}/comments/{commentId:guid}", async (
+    Guid postId,
+    Guid commentId,
+    ClaimsPrincipal principal,
+    IMongoCollection<CommentDocument> comments,
+    IEventPublisher events,
+    CancellationToken ct) =>
+{
+    var userId = principal.GetUserId();
+    if (userId is null) return Results.Unauthorized();
+
+    var comment = await comments.Find(c => c.Id == commentId && c.PostId == postId).FirstOrDefaultAsync(ct);
+    if (comment is null) return Results.NotFound(new { error = "Comment not found." });
+    if (comment.AuthorId != userId) return Results.Forbid();
+
+    await comments.DeleteOneAsync(c => c.Id == commentId, ct);
+    await events.PublishAsync(new CommentDeleted(comment.Id, comment.PostId, comment.AuthorId, DateTimeOffset.UtcNow), ct);
+    return Results.NoContent();
+}).RequireAuthorization();
+
 app.MapGet("/api/posts/{postId:guid}/summary", async (
     Guid postId,
     ClaimsPrincipal principal,
