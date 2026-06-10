@@ -95,6 +95,10 @@ app.MapPut("/api/posts/{id:guid}", async (
     if (string.IsNullOrWhiteSpace(request.Content) || request.Content.Length > 280)
         return Results.BadRequest(new { error = "Post content must be between 1 and 280 characters." });
 
+    var existing = await posts.Find(p => p.Id == id).FirstOrDefaultAsync(ct);
+    if (existing is null) return Results.NotFound(new { error = "Post not found." });
+    if (existing.AuthorId != userId) return Results.Forbid();
+
     var updatedContent = request.Content.Trim();
     var update = Builders<PostDocument>.Update
         .Set(p => p.Content, updatedContent)
@@ -102,7 +106,7 @@ app.MapPut("/api/posts/{id:guid}", async (
         .Set(p => p.Mentions, MentionExtractor.Extract(updatedContent))
         .Set(p => p.UpdatedAt, DateTimeOffset.UtcNow);
     var post = await posts.FindOneAndUpdateAsync(
-        p => p.Id == id && p.AuthorId == userId,
+        p => p.Id == id,
         update,
         new FindOneAndUpdateOptions<PostDocument> { ReturnDocument = ReturnDocument.After },
         ct);
@@ -122,7 +126,11 @@ app.MapDelete("/api/posts/{id:guid}", async (
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
 
-    var post = await posts.FindOneAndDeleteAsync(p => p.Id == id && p.AuthorId == userId, cancellationToken: ct);
+    var toDelete = await posts.Find(p => p.Id == id).FirstOrDefaultAsync(ct);
+    if (toDelete is null) return Results.NotFound(new { error = "Post not found." });
+    if (toDelete.AuthorId != userId) return Results.Forbid();
+
+    var post = await posts.FindOneAndDeleteAsync(p => p.Id == id, cancellationToken: ct);
     if (post is null) return Results.NotFound(new { error = "Post not found." });
 
     await events.PublishAsync(new PostDeleted(post.Id, post.AuthorId, DateTimeOffset.UtcNow), ct);

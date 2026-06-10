@@ -101,7 +101,7 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
-    public async Task UpdatePost_by_non_author_returns_404()
+    public async Task UpdatePost_by_non_author_returns_403()
     {
         var author = await fx.RegisterAndLoginAsync();
         var other = await fx.RegisterAndLoginAsync();
@@ -110,6 +110,41 @@ public sealed class PostApiTests(IntegrationFixture fx)
         var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
 
         using var update = fx.AuthorizedRequest(HttpMethod.Put, $"/api/posts/{post!.PostId}", other.Token, new { content = "Stolen" });
+        var response = await fx.Post.SendAsync(update);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeletePost_by_non_author_returns_403()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var other = await fx.RegisterAndLoginAsync();
+
+        using var create = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "My post" });
+        var post = await (await fx.Post.SendAsync(create)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var delete = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{post!.PostId}", other.Token);
+        var response = await fx.Post.SendAsync(delete);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeletePost_nonexistent_returns_404()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var delete = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{Guid.NewGuid()}", session.Token);
+        var response = await fx.Post.SendAsync(delete);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdatePost_nonexistent_returns_404()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        using var update = fx.AuthorizedRequest(HttpMethod.Put, $"/api/posts/{Guid.NewGuid()}", session.Token, new { content = "Updated" });
         var response = await fx.Post.SendAsync(update);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
