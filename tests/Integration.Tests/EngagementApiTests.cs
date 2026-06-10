@@ -129,6 +129,30 @@ public sealed class EngagementApiTests(IntegrationFixture fx)
         var body = await response.Content.ReadAsStringAsync();
         Assert.Equal("Healthy", body);
     }
+
+    [Fact]
+    public async Task AddComment_over_280_chars_returns_400()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var longContent = new string('a', 281);
+
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{Guid.NewGuid()}/comments", session.Token, new { content = longContent });
+        var response = await fx.Engagement.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddComment_exactly_280_chars_returns_201()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var content = new string('a', 280);
+
+        using var request = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{Guid.NewGuid()}/comments", session.Token, new { content });
+        var response = await fx.Engagement.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
 }
 
 file sealed record LikeCountDto(int LikeCount);

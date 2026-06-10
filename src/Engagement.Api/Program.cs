@@ -104,6 +104,7 @@ app.MapPost("/api/posts/{postId:guid}/comments", async (
     var userId = principal.GetUserId();
     if (userId is null) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(request.Content)) return Results.BadRequest(new { error = "Comment content is required." });
+    if (request.Content.Length > 280) return Results.BadRequest(new { error = "Comment content must be 280 characters or fewer." });
 
     var comment = new CommentDocument
     {
