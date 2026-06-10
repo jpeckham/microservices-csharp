@@ -812,6 +812,52 @@ public sealed class PostApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Repost_increments_original_post_repost_count()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter1 = await fx.RegisterAndLoginAsync();
+        var reposter2 = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Original post" });
+        var original = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(0, original!.RepostCount);
+
+        using var r1 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original.PostId}/reposts", reposter1.Token, new { content = "" });
+        await fx.Post.SendAsync(r1);
+
+        using var getReq1 = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{original.PostId}", author.Token);
+        var after1 = await (await fx.Post.SendAsync(getReq1)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(1, after1!.RepostCount);
+
+        using var r2 = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original.PostId}/reposts", reposter2.Token, new { content = "" });
+        await fx.Post.SendAsync(r2);
+
+        using var getReq2 = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{original.PostId}", author.Token);
+        var after2 = await (await fx.Post.SendAsync(getReq2)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(2, after2!.RepostCount);
+    }
+
+    [Fact]
+    public async Task DeleteMyRepost_decrements_original_post_repost_count()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Post to repost" });
+        var original = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        await fx.Post.SendAsync(repostReq);
+
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{original.PostId}/reposts/mine", reposter.Token);
+        await fx.Post.SendAsync(deleteReq);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{original.PostId}", author.Token);
+        var after = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(0, after!.RepostCount);
+    }
 }
 
 file sealed record SearchResultsDto(List<PostDto> Posts, string Query, int Limit, int Offset);
