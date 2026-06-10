@@ -530,4 +530,137 @@ public sealed class FeedApiTests(IntegrationFixture fx)
 
         Assert.Contains(entries!, e => e.PostId == postId);
     }
+
+    [Fact]
+    public async Task GetFeed_entry_has_LikedByMe_false_before_user_likes_it()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = session.UserId,
+            AuthorHandle = $"@{session.Handle}",
+            AuthorDisplayName = session.DisplayName,
+            Content = "Post to check like state",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        Assert.False(entry.LikedByMe);
+    }
+
+    [Fact]
+    public async Task GetFeed_entry_has_LikedByMe_true_after_LikeAdded_event()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@author",
+            AuthorDisplayName = "Author",
+            Content = "Post to like",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/LikeAdded", new
+        {
+            LikeId = Guid.NewGuid(),
+            PostId = postId,
+            UserId = session.UserId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        Assert.True(entry.LikedByMe);
+    }
+
+    [Fact]
+    public async Task GetFeed_entry_has_LikedByMe_false_after_LikeRemoved_event()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@author2",
+            AuthorDisplayName = "Author 2",
+            Content = "Post to like then unlike",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/LikeAdded", new
+        {
+            LikeId = Guid.NewGuid(),
+            PostId = postId,
+            UserId = session.UserId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        await fx.Feed.PostAsJsonAsync("/events/LikeRemoved", new
+        {
+            LikeId = Guid.NewGuid(),
+            PostId = postId,
+            UserId = session.UserId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var req = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", session.Token);
+        var feedResponse = await fx.Feed.SendAsync(req);
+        var entries = await feedResponse.Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+
+        var entry = Assert.Single(entries!, e => e.PostId == postId);
+        Assert.False(entry.LikedByMe);
+    }
+
+    [Fact]
+    public async Task GetFeed_LikedByMe_only_reflects_current_user_not_other_users()
+    {
+        var alice = await fx.RegisterAndLoginAsync();
+        var bob = await fx.RegisterAndLoginAsync();
+        var postId = Guid.NewGuid();
+
+        await fx.Feed.PostAsJsonAsync("/events/PostCreated", new
+        {
+            PostId = postId,
+            AuthorId = Guid.NewGuid(),
+            AuthorHandle = "@shared",
+            AuthorDisplayName = "Shared Author",
+            Content = "Shared post",
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        // Only Alice likes it
+        await fx.Feed.PostAsJsonAsync("/events/LikeAdded", new
+        {
+            LikeId = Guid.NewGuid(),
+            PostId = postId,
+            UserId = alice.UserId,
+            OccurredAt = DateTimeOffset.UtcNow
+        });
+
+        using var aliceReq = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", alice.Token);
+        var aliceFeed = await (await fx.Feed.SendAsync(aliceReq)).Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+        var aliceEntry = Assert.Single(aliceFeed!, e => e.PostId == postId);
+        Assert.True(aliceEntry.LikedByMe);
+
+        using var bobReq = fx.AuthorizedRequest(HttpMethod.Get, "/api/feed?limit=100&offset=0&followingOnly=false", bob.Token);
+        var bobFeed = await (await fx.Feed.SendAsync(bobReq)).Content.ReadFromJsonAsync<List<FeedEntryDto>>();
+        var bobEntry = Assert.Single(bobFeed!, e => e.PostId == postId);
+        Assert.False(bobEntry.LikedByMe);
+    }
 }

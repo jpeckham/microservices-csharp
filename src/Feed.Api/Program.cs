@@ -22,6 +22,7 @@ builder.Services.AddSingleton(_ =>
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<FeedEntryDocument>("feedEntries"));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<FeedFollowDocument>("feedFollows"));
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<FeedBlockDocument>("feedBlocks"));
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IMongoDatabase>().GetCollection<FeedLikeDocument>("feedLikes"));
 builder.Services.AddHostedService<ServiceBusFeedConsumer>();
 
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "local-development-secret-change-me-32";
@@ -59,6 +60,7 @@ app.MapGet("/api/feed", async (
     IMongoCollection<FeedEntryDocument> entries,
     IMongoCollection<FeedFollowDocument> follows,
     IMongoCollection<FeedBlockDocument> blocks,
+    IMongoCollection<FeedLikeDocument> feedLikes,
     CancellationToken ct) =>
 {
     var userId = principal.GetUserId();
@@ -83,7 +85,17 @@ app.MapGet("/api/feed", async (
         .Skip(offset)
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
-    return Results.Ok(result.Select(ToDto));
+
+    HashSet<Guid> likedPostIds = [];
+    if (userId.HasValue && result.Count > 0)
+    {
+        var postIds = result.Select(e => e.PostId).ToList();
+        likedPostIds = (await feedLikes.Find(l => l.UserId == userId.Value && postIds.Contains(l.PostId))
+            .Project(l => l.PostId)
+            .ToListAsync(ct)).ToHashSet();
+    }
+
+    return Results.Ok(result.Select(e => ToDto(e, likedPostIds.Contains(e.PostId))));
 }).RequireAuthorization();
 
 app.MapGet("/api/feed/users/{userId:guid}", async (Guid userId, int limit, int offset, IMongoCollection<FeedEntryDocument> entries, CancellationToken ct) =>
@@ -93,7 +105,7 @@ app.MapGet("/api/feed/users/{userId:guid}", async (Guid userId, int limit, int o
         .Skip(offset)
         .Limit(limit is <= 0 or > 100 ? 20 : limit)
         .ToListAsync(ct);
-    return Results.Ok(result.Select(ToDto));
+    return Results.Ok(result.Select(e => ToDto(e)));
 }).RequireAuthorization();
 
 app.MapPost("/events/PostCreated", async (PostCreated integrationEvent, IMongoCollection<FeedEntryDocument> entries, CancellationToken ct) =>
@@ -167,15 +179,18 @@ app.MapPost("/events/UserUnfollowed", async (UserUnfollowed integrationEvent, IM
     return Results.Accepted();
 });
 
-app.MapPost("/events/LikeAdded", async (LikeAdded integrationEvent, IMongoCollection<FeedEntryDocument> entries, CancellationToken ct) =>
+app.MapPost("/events/LikeAdded", async (LikeAdded integrationEvent, IMongoCollection<FeedEntryDocument> entries, IMongoCollection<FeedLikeDocument> feedLikes, CancellationToken ct) =>
 {
     await entries.UpdateOneAsync(e => e.PostId == integrationEvent.PostId, Builders<FeedEntryDocument>.Update.Inc(e => e.LikeCount, 1), cancellationToken: ct);
+    var like = new FeedLikeDocument { UserId = integrationEvent.UserId, PostId = integrationEvent.PostId };
+    await feedLikes.ReplaceOneAsync(l => l.UserId == like.UserId && l.PostId == like.PostId, like, new ReplaceOptions { IsUpsert = true }, ct);
     return Results.Accepted();
 });
 
-app.MapPost("/events/LikeRemoved", async (LikeRemoved integrationEvent, IMongoCollection<FeedEntryDocument> entries, CancellationToken ct) =>
+app.MapPost("/events/LikeRemoved", async (LikeRemoved integrationEvent, IMongoCollection<FeedEntryDocument> entries, IMongoCollection<FeedLikeDocument> feedLikes, CancellationToken ct) =>
 {
     await entries.UpdateOneAsync(e => e.PostId == integrationEvent.PostId && e.LikeCount > 0, Builders<FeedEntryDocument>.Update.Inc(e => e.LikeCount, -1), cancellationToken: ct);
+    await feedLikes.DeleteOneAsync(l => l.UserId == integrationEvent.UserId && l.PostId == integrationEvent.PostId, ct);
     return Results.Accepted();
 });
 
@@ -216,8 +231,8 @@ app.MapPost("/events/UserUnblocked", async (UserUnblocked integrationEvent, IMon
 app.MapHealthChecks("/health");
 app.Run();
 
-static FeedEntryDto ToDto(FeedEntryDocument entry) =>
-    new(entry.PostId, entry.AuthorId, entry.AuthorHandle, entry.AuthorDisplayName, entry.Content, entry.PostedAt, entry.LikeCount, entry.CommentCount);
+static FeedEntryDto ToDto(FeedEntryDocument entry, bool likedByMe = false) =>
+    new(entry.PostId, entry.AuthorId, entry.AuthorHandle, entry.AuthorDisplayName, entry.Content, entry.PostedAt, entry.LikeCount, entry.CommentCount, likedByMe);
 
 public sealed class FeedEntryDocument
 {
@@ -262,7 +277,16 @@ public sealed class FeedBlockDocument
     public DateTimeOffset CreatedAt { get; set; }
 }
 
-public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, int LikeCount, int CommentCount);
+public sealed class FeedLikeDocument
+{
+    [BsonId]
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid UserId { get; set; }
+    [BsonGuidRepresentation(GuidRepresentation.Standard)]
+    public Guid PostId { get; set; }
+}
+
+public sealed record FeedEntryDto(Guid PostId, Guid AuthorId, string AuthorHandle, string AuthorDisplayName, string Content, DateTimeOffset PostedAt, int LikeCount, int CommentCount, bool LikedByMe = false);
 
 public static class ClaimsPrincipalExtensions
 {
@@ -280,6 +304,7 @@ public sealed class ServiceBusFeedConsumer(
     IMongoCollection<FeedEntryDocument> entries,
     IMongoCollection<FeedFollowDocument> follows,
     IMongoCollection<FeedBlockDocument> blocks,
+    IMongoCollection<FeedLikeDocument> feedLikes,
     ILogger<ServiceBusFeedConsumer> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -357,6 +382,8 @@ public sealed class ServiceBusFeedConsumer(
                 if (likeAdded is not null)
                 {
                     await entries.UpdateOneAsync(e => e.PostId == likeAdded.PostId, Builders<FeedEntryDocument>.Update.Inc(e => e.LikeCount, 1), cancellationToken: args.CancellationToken);
+                    var like = new FeedLikeDocument { UserId = likeAdded.UserId, PostId = likeAdded.PostId };
+                    await feedLikes.ReplaceOneAsync(l => l.UserId == like.UserId && l.PostId == like.PostId, like, new ReplaceOptions { IsUpsert = true }, args.CancellationToken);
                 }
                 break;
             case nameof(LikeRemoved):
@@ -364,6 +391,7 @@ public sealed class ServiceBusFeedConsumer(
                 if (likeRemoved is not null)
                 {
                     await entries.UpdateOneAsync(e => e.PostId == likeRemoved.PostId && e.LikeCount > 0, Builders<FeedEntryDocument>.Update.Inc(e => e.LikeCount, -1), cancellationToken: args.CancellationToken);
+                    await feedLikes.DeleteOneAsync(l => l.UserId == likeRemoved.UserId && l.PostId == likeRemoved.PostId, args.CancellationToken);
                 }
                 break;
             case nameof(CommentAdded):
