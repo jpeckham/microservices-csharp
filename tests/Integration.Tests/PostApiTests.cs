@@ -972,6 +972,28 @@ public sealed class PostApiTests(IntegrationFixture fx)
     }
 
     [Fact]
+    public async Task DeletePost_when_post_is_repost_decrements_original_repost_count()
+    {
+        var author = await fx.RegisterAndLoginAsync();
+        var reposter = await fx.RegisterAndLoginAsync();
+
+        using var createReq = fx.AuthorizedRequest(HttpMethod.Post, "/api/posts", author.Token, new { content = "Original to count reposts of" });
+        var original = await (await fx.Post.SendAsync(createReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        using var repostReq = fx.AuthorizedRequest(HttpMethod.Post, $"/api/posts/{original!.PostId}/reposts", reposter.Token, new { content = "" });
+        var repost = await (await fx.Post.SendAsync(repostReq)).Content.ReadFromJsonAsync<PostDto>();
+
+        // Delete the repost via generic delete (not via reposts/mine)
+        using var deleteReq = fx.AuthorizedRequest(HttpMethod.Delete, $"/api/posts/{repost!.PostId}", reposter.Token);
+        var deleteResp = await fx.Post.SendAsync(deleteReq);
+        Assert.Equal(HttpStatusCode.NoContent, deleteResp.StatusCode);
+
+        using var getReq = fx.AuthorizedRequest(HttpMethod.Get, $"/api/posts/{original.PostId}", author.Token);
+        var after = await (await fx.Post.SendAsync(getReq)).Content.ReadFromJsonAsync<PostDto>();
+        Assert.Equal(0, after!.RepostCount);
+    }
+
+    [Fact]
     public async Task GetPost_returns_reposted_by_me_false_when_not_reposted()
     {
         var author = await fx.RegisterAndLoginAsync();
