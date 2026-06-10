@@ -167,7 +167,7 @@ app.MapGet("/api/users/search", async (string? q, int limit, int offset, IMongoC
         .Limit(clampedLimit)
         .ToListAsync(ct);
     return Results.Ok(result.Select(u => new UserSearchResultDto(u.Id, u.Handle, u.DisplayName)));
-});
+}).RequireAuthorization();
 
 app.MapPut("/api/users/me/display-name", async (
     UpdateDisplayNameRequest request,

@@ -581,6 +581,27 @@ public sealed class IdentityApiTests(IntegrationFixture fx)
 
         Assert.Equal(HttpStatusCode.BadRequest, verifyResp.StatusCode);
     }
+    [Fact]
+    public async Task UserSearch_without_auth_returns_401()
+    {
+        var response = await fx.Identity.GetAsync("/api/users/search?q=test");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UserSearch_with_auth_returns_results()
+    {
+        var session = await fx.RegisterAndLoginAsync();
+
+        using var request = fx.AuthorizedRequest(HttpMethod.Get, $"/api/users/search?q={session.Handle}&limit=20&offset=0", session.Token);
+        var response = await fx.Identity.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var results = await response.Content.ReadFromJsonAsync<List<UserSearchResultDto>>();
+        Assert.Contains(results!, r => r.Handle == $"@{session.Handle}");
+    }
 }
 
 file sealed record PendingRegistrationDto(Guid PendingRegistrationId);
+file sealed record UserSearchResultDto(Guid UserId, string Handle, string DisplayName);
